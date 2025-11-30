@@ -84,14 +84,26 @@ class StorageService {
   // Watch history operations
   Future<void> saveWatchHistory(WatchHistory history) async {
     final box = Hive.box<WatchHistory>(_historyBox);
+    // Use composite key to store history for each episode individually
     final key = '${history.animeId}_${history.episodeId}';
     await box.put(key, history);
   }
 
-  WatchHistory? getWatchHistory(String animeId, String episodeId) {
+  // Get specific episode history
+  WatchHistory? getEpisodeHistory(String animeId, String episodeId) {
     final box = Hive.box<WatchHistory>(_historyBox);
     final key = '${animeId}_$episodeId';
     return box.get(key);
+  }
+
+  // Get latest history for an anime (for continue watching logic)
+  WatchHistory? getLatestAnimeHistory(String animeId) {
+    final box = Hive.box<WatchHistory>(_historyBox);
+    final animeHistory = box.values.where((h) => h.animeId == animeId).toList();
+    if (animeHistory.isEmpty) return null;
+    
+    animeHistory.sort((a, b) => b.lastWatched.compareTo(a.lastWatched));
+    return animeHistory.first;
   }
 
   List<WatchHistory> getAllHistory() {
@@ -101,12 +113,28 @@ class StorageService {
     return histories;
   }
 
-  // Get continue watching list (incomplete episodes)
+  // Get continue watching list (latest incomplete episode per anime)
   List<WatchHistory> getContinueWatching() {
     final box = Hive.box<WatchHistory>(_historyBox);
-    final histories = box.values.where((h) => !h.isCompleted).toList();
-    histories.sort((a, b) => b.lastWatched.compareTo(a.lastWatched));
-    return histories;
+    final allHistory = box.values.toList();
+    
+    // Group by animeId
+    final Map<String, WatchHistory> latestPerAnime = {};
+    
+    for (var history in allHistory) {
+      if (latestPerAnime.containsKey(history.animeId)) {
+        if (history.lastWatched.isAfter(latestPerAnime[history.animeId]!.lastWatched)) {
+          latestPerAnime[history.animeId] = history;
+        }
+      } else {
+        latestPerAnime[history.animeId] = history;
+      }
+    }
+    
+    // Filter for incomplete and sort
+    final result = latestPerAnime.values.where((h) => !h.isCompleted).toList();
+    result.sort((a, b) => b.lastWatched.compareTo(a.lastWatched));
+    return result;
   }
 
   // Anime cache operations

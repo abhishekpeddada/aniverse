@@ -9,14 +9,22 @@ import '../player/video_player_screen.dart';
 
 class AnimeDetailsScreen extends ConsumerWidget {
   final String animeId;
+  final String? continueEpisodeId;
 
-  const AnimeDetailsScreen({super.key, required this.animeId});
+  const AnimeDetailsScreen({
+    super.key, 
+    required this.animeId,
+    this.continueEpisodeId,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final animeDetails = ref.watch(animeDetailsProvider(animeId));
-    final isInWatchlist = ref.watch(watchlistProvider.notifier).isInWatchlist(animeId);
-    final isInFavorites = ref.watch(favoritesProvider.notifier).isInFavorites(animeId);
+    final watchlist = ref.watch(watchlistProvider);
+    final favorites = ref.watch(favoritesProvider);
+    
+    final isInWatchlist = watchlist.contains(animeId);
+    final isInFavorites = favorites.contains(animeId);
     final storageService = ref.watch(storageServiceProvider);
 
     return Scaffold(
@@ -177,26 +185,41 @@ class AnimeDetailsScreen extends ConsumerWidget {
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
                     final episode = episodes[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        child: Text('${episode.number}'),
-                      ),
-                      title: Text(episode.title ?? 'Episode ${episode.number}'),
-                      trailing: const Icon(Icons.play_arrow),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => VideoPlayerScreen(
-                              episodeId: episode.id,
-                              animeId: animeId,
-                              animeTitle: anime.title,
-                              animeImage: anime.image,
-                              episodeNumber: episode.number,
+                    final isNextToWatch = episode.id == continueEpisodeId;
+                    
+                    return Container(
+                      color: isNextToWatch ? Colors.red.withOpacity(0.15) : null,
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: isNextToWatch ? Colors.red : null,
+                          foregroundColor: isNextToWatch ? Colors.white : null,
+                          child: Text('${episode.number}'),
+                        ),
+                        title: Text(
+                          episode.title ?? 'Episode ${episode.number}',
+                          style: isNextToWatch 
+                              ? const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)
+                              : null,
+                        ),
+                        trailing: Icon(
+                          Icons.play_arrow,
+                          color: isNextToWatch ? Colors.red : null,
+                        ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => VideoPlayerScreen(
+                                episodeId: episode.id,
+                                animeId: animeId,
+                                animeTitle: anime.title,
+                                animeImage: anime.image,
+                                episodeNumber: episode.number,
+                              ),
                             ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     );
                   },
                   childCount: episodes.length,

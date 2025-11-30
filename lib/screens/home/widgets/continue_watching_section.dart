@@ -62,7 +62,10 @@ class ContinueWatchingSection extends ConsumerWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => AnimeDetailsScreen(animeId: history.animeId),
+                      builder: (_) => AnimeDetailsScreen(
+                        animeId: history.animeId,
+                        continueEpisodeId: history.episodeId,
+                      ),
                     ),
                   );
                 },

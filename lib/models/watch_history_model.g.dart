@@ -22,8 +22,8 @@ class WatchHistoryAdapter extends TypeAdapter<WatchHistory> {
       animeImage: fields[2] as String?,
       episodeNumber: fields[3] as int,
       episodeId: fields[4] as String,
-      position: fields[5] as Duration,
-      duration: fields[6] as Duration,
+      positionMs: fields[5] as int,
+      durationMs: fields[6] as int,
       lastWatched: fields[7] as DateTime,
     );
   }
@@ -43,9 +43,9 @@ class WatchHistoryAdapter extends TypeAdapter<WatchHistory> {
       ..writeByte(4)
       ..write(obj.episodeId)
       ..writeByte(5)
-      ..write(obj.position)
+      ..write(obj.positionMs)
       ..writeByte(6)
-      ..write(obj.duration)
+      ..write(obj.durationMs)
       ..writeByte(7)
       ..write(obj.lastWatched);
   }

@@ -30,7 +30,7 @@ class VideoPlayerScreen extends ConsumerStatefulWidget {
   ConsumerState<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
 }
 
-class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
+class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with WidgetsBindingObserver {
   late final Player player;
   late final VideoController controller;
   bool isInitialized = false;
@@ -40,6 +40,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
@@ -53,6 +54,17 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     
     _initializePlayer();
     _setupPositionListener();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      // App is in background or closed
+      if (player.state.playing) {
+        player.pause();
+      }
+    }
   }
 
   Future<void> _initializePlayer() async {
@@ -79,12 +91,16 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
           errorMessage = 'Launching mpv player...';
         });
         
-        await Process.start('mpv', [
+        final mpvProcess = await Process.start('mpv', [
           '--http-header-fields=Referer: https://allanime.to',
           '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
           '--title=Anime Watcher - ${widget.animeTitle} Episode ${widget.episodeNumber}',
           videoUrl,
         ]);
+        
+        mpvProcess.exitCode.then((code) {
+          debugPrint('🛑 mpv exited with code: $code');
+        });
         
         await Future.delayed(const Duration(milliseconds: 500));
         
@@ -95,7 +111,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
       }
       
       final storageService = ref.read(storageServiceProvider);
-      final history = storageService.getWatchHistory(widget.animeId, widget.episodeId);
+      // Get history for this specific episode
+      final history = storageService.getEpisodeHistory(widget.animeId, widget.episodeId);
       
       await player.open(
         Media(videoUrl,
@@ -143,8 +160,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
       animeImage: widget.animeImage,
       episodeNumber: widget.episodeNumber,
       episodeId: widget.episodeId,
-      position: position,
-      duration: duration,
+      positionMs: position.inMilliseconds,
+      durationMs: duration.inMilliseconds,
       lastWatched: DateTime.now(),
     );
     
@@ -153,6 +170,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     final position = player.state.position;
     final duration = player.state.duration;
     if (duration.inSeconds > 0) {
@@ -168,6 +186,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
+    player.stop(); // Force stop playback
     player.dispose();
     super.dispose();
   }
@@ -202,31 +221,44 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: isInitialized
-          ? Video(
-              controller: controller,
-              controls: MaterialVideoControls,
-              fit: BoxFit.contain,
-              fill: Colors.black,
-            )
-          : Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const CircularProgressIndicator(),
-                  if (errorMessage != null) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      errorMessage!,
-                      style: const TextStyle(color: Colors.white70, fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        
+        // Force stop player before popping
+        await player.stop();
+        
+        if (context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: isInitialized
+            ? Video(
+                controller: controller,
+                controls: MaterialVideoControls,
+                fit: BoxFit.contain,
+                fill: Colors.black,
+              )
+            : Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(),
+                    if (errorMessage != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        errorMessage!,
+                        style: const TextStyle(color: Colors.white70, fontSize: 16),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
+      ),
     );
   }
 }

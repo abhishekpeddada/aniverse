@@ -5,6 +5,9 @@ import '../lists/watchlist_screen.dart';
 import '../lists/favorites_screen.dart';
 import '../lists/history_screen.dart';
 import 'widgets/continue_watching_section.dart';
+import '../profile/profile_screen.dart';
+import '../auth/login_screen.dart';
+import '../../providers/auth_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -73,6 +76,23 @@ class HomePage extends ConsumerWidget {
                 context,
                 MaterialPageRoute(builder: (_) => const HistoryScreen()),
               );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.account_circle),
+            onPressed: () {
+              final user = ref.read(currentUserProvider);
+              if (user != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                );
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                );
+              }
             },
           ),
         ],

@@ -3,7 +3,10 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  cloud_firestore
   dynamic_color
+  firebase_auth
+  firebase_core
   media_kit_libs_windows_video
   media_kit_video
   volume_controller

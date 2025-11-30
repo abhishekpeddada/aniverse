@@ -20,10 +20,10 @@ class WatchHistory {
   final String episodeId;
 
   @HiveField(5)
-  final Duration position;
+  final int positionMs;
 
   @HiveField(6)
-  final Duration duration;
+  final int durationMs;
 
   @HiveField(7)
   final DateTime lastWatched;
@@ -34,20 +34,23 @@ class WatchHistory {
     this.animeImage,
     required this.episodeNumber,
     required this.episodeId,
-    required this.position,
-    required this.duration,
+    required this.positionMs,
+    required this.durationMs,
     required this.lastWatched,
   });
 
-  double get progress => duration.inMilliseconds > 0 
-      ? position.inMilliseconds / duration.inMilliseconds 
+  Duration get position => Duration(milliseconds: positionMs);
+  Duration get duration => Duration(milliseconds: durationMs);
+
+  double get progress => durationMs > 0 
+      ? positionMs / durationMs 
       : 0.0;
 
-  bool get isCompleted => progress > 0.9; // Consider 90% as completed
+  bool get isCompleted => progress > 0.9;
 
   WatchHistory copyWith({
-    Duration? position,
-    Duration? duration,
+    int? positionMs,
+    int? durationMs,
     DateTime? lastWatched,
   }) {
     return WatchHistory(
@@ -56,8 +59,8 @@ class WatchHistory {
       animeImage: animeImage,
       episodeNumber: episodeNumber,
       episodeId: episodeId,
-      position: position ?? this.position,
-      duration: duration ?? this.duration,
+      positionMs: positionMs ?? this.positionMs,
+      durationMs: durationMs ?? this.durationMs,
       lastWatched: lastWatched ?? this.lastWatched,
     );
   }

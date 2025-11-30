@@ -1,4 +1,4 @@
-package com.animeapp.anime_watcher
+package com.animewatcher
 
 import io.flutter.embedding.android.FlutterActivity
 
