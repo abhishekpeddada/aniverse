@@ -32,10 +32,13 @@ class HistoryNotifier extends StateNotifier<List<WatchHistory>> {
     // Always save locally
     await _storageService.saveWatchHistory(history);
     
-    // Sync to Firestore if logged in
+    // NOTE: Firestore sync disabled to reduce read/write operations as per user request.
+    // If needed in future, uncomment the following:
+    /*
     if (_user != null) {
       await _firestoreService.syncWatchHistory(_user!.uid, history);
     }
+    */
     
     _loadHistory();
   }

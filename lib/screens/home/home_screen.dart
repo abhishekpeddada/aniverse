@@ -70,15 +70,6 @@ class HomePage extends ConsumerWidget {
         title: const Text('Anime Watcher'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.history),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const HistoryScreen()),
-              );
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.account_circle),
             onPressed: () {
               final user = ref.read(currentUserProvider);
