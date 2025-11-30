@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -69,6 +71,28 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
 
       final videoUrl = sources['sources'][0]['url'];
       debugPrint('🎥 Playing URL: ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
+      
+      if (defaultTargetPlatform == TargetPlatform.linux) {
+        debugPrint('🐧 Launching mpv on Linux');
+        
+        setState(() {
+          errorMessage = 'Launching mpv player...';
+        });
+        
+        await Process.start('mpv', [
+          '--http-header-fields=Referer: https://allanime.to',
+          '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+          '--title=Anime Watcher - ${widget.animeTitle} Episode ${widget.episodeNumber}',
+          videoUrl,
+        ]);
+        
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        if (mounted) {
+          Navigator.pop(context);
+        }
+        return;
+      }
       
       final storageService = ref.read(storageServiceProvider);
       final history = storageService.getWatchHistory(widget.animeId, widget.episodeId);
@@ -187,8 +211,21 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
               fit: BoxFit.contain,
               fill: Colors.black,
             )
-          : const Center(
-              child: CircularProgressIndicator(),
+          : Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  if (errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      errorMessage!,
+                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
+              ),
             ),
     );
   }
