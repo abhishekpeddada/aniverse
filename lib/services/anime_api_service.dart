@@ -173,9 +173,12 @@ class AnimeApiService {
     }
   }
 
-  Future<Map<String, dynamic>?> getEpisodeSources(String episodeId) async {
+  Future<Map<String, dynamic>?> getEpisodeSources(
+    String episodeId, {
+    String translationType = 'sub', // 'sub' or 'dub'
+  }) async {
     try {
-      debugPrint('🎬 Getting episode sources: $episodeId');
+      debugPrint('🎬 Getting episode sources: $episodeId (type: $translationType)');
 
       final parts = episodeId.split('-');
       if (parts.length < 2) return null;
@@ -194,7 +197,7 @@ class AnimeApiService {
 
       final variables = {
         'showId': showId,
-        'translationType': 'sub',
+        'translationType': translationType,
         'episodeString': episodeString,
       };
 
@@ -227,9 +230,9 @@ class AnimeApiService {
                 debugPrint('📺 Source: $sourceName ($priority) - ${decodedUrl.substring(0, decodedUrl.length > 50 ? 50 : decodedUrl.length)}...');
                 sources.add({
                   'url': decodedUrl,
-                  'quality': 'default',
+                  'quality': _extractQuality(sourceName, decodedUrl),
                   'isM3U8': decodedUrl.contains('.m3u8'),
-                  'sourceName': sourceName,
+                  'sourceName': sourceName ?? 'Unknown',
                   'priority': priority ?? 0,
                 });
               }
@@ -239,11 +242,13 @@ class AnimeApiService {
           sources.sort((a, b) => (b['priority'] as num).compareTo(a['priority'] as num));
 
           if (sources.isNotEmpty) {
-            debugPrint('✅ Found ${sources.length} video sources (filtered, sorted by priority)');
-            debugPrint('🎬 Using: ${sources.first['sourceName']} (priority: ${sources.first['priority']})');
+            debugPrint('✅ Found ${sources.length} video sources');
           }
           
-          return {'sources': sources};
+          return {
+            'sources': sources,
+            'translationType': translationType,
+          };
         }
       }
 
@@ -253,6 +258,109 @@ class AnimeApiService {
       debugPrint('📍 Stack trace: $stackTrace');
       return null;
     }
+  }
+
+  String _extractQuality(String? sourceName, String url) {
+    // Try to extract quality from source name
+    if (sourceName != null) {
+      final qualityRegex = RegExp(r'(\d{3,4})[pP]');
+      final match = qualityRegex.firstMatch(sourceName);
+      if (match != null) {
+        return '${match.group(1)}p';
+      }
+    }
+    
+    // Default quality labels based on source name
+    if (sourceName?.contains('1080') == true) return '1080p';
+    if (sourceName?.contains('720') == true) return '720p';
+    if (sourceName?.contains('480') == true) return '480p';
+    if (sourceName?.contains('360') == true) return '360p';
+    
+    // For M3U8, it's usually adaptive quality
+    if (url.contains('.m3u8')) return 'Auto';
+    
+    return 'Default';
+  }
+
+  Future<List<Map<String, dynamic>>> getLatestReleases({int page = 1, int limit = 30}) async {
+    try {
+      debugPrint('📅 Fetching latest releases (page: $page, limit: $limit)');
+
+      const latestQuery = r'''
+        query($search: SearchInput, $limit: Int, $page: Int, $sortBy: SearchSortEnum) {
+          shows(search: $search, limit: $limit, page: $page, sortBy: $sortBy) {
+            edges {
+              _id
+              name
+              thumbnail
+              availableEpisodes
+            }
+          }
+        }
+      ''';
+
+      final variables = {
+        'search': {
+          'allowAdult': false,
+          'allowUnknown': false,
+        },
+        'limit': limit,
+        'page': page,
+        'sortBy': 'Latest_Update',  // Sort by most recent updates
+      };
+
+      final response = await _dio.get(
+        ApiConstants.apiPath,
+        queryParameters: {
+          'variables': jsonEncode(variables),
+          'query': latestQuery,
+        },
+      );
+
+      debugPrint('✅ Latest releases response: ${response.statusCode}');
+
+      if (response.data != null && response.data['data'] != null) {
+        final shows = response.data['data']['shows']['edges'] as List;
+        debugPrint('✅ Found ${shows.length} latest releases');
+
+        return shows.map((show) {
+          final availableEps = show['availableEpisodes'] as Map?;
+          
+          return {
+            'id': show['_id'],
+            'title': show['name'],
+            'image': show['thumbnail'],
+            'latestEpisode': _parseLatestEpisode(availableEps, null),
+            'hasSubbed': availableEps?['sub'] != null,
+            'hasDubbed': availableEps?['dub'] != null,
+          };
+        }).toList();
+      }
+
+      return [];
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error fetching latest releases: $e');
+      debugPrint('📍 Stack trace: $stackTrace');
+      return [];
+    }
+  }
+
+  String _parseLatestEpisode(Map? availableEps, Map? lastEpInfo) {
+    if (lastEpInfo != null) {
+      final subEp = lastEpInfo['sub'];
+      final dubEp = lastEpInfo['dub'];
+      if (subEp != null) return 'Ep $subEp';
+      if (dubEp != null) return 'Ep $dubEp';
+    }
+    
+    if (availableEps != null) {
+      final subCount = availableEps['sub'];
+      final dubCount = availableEps['dub'];
+      if (subCount != null) return 'Ep $subCount';
+      if (dubCount != null) return 'Ep $dubCount';
+    }
+    
+    return 'New';
   }
 
   String? _decodeAllAnimeUrl(String encodedUrl) {

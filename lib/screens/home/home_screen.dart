@@ -4,6 +4,7 @@ import '../search/search_screen.dart';
 import '../lists/watchlist_screen.dart';
 import '../lists/favorites_screen.dart';
 import '../lists/history_screen.dart';
+import '../latest/latest_releases_screen.dart';
 import 'widgets/continue_watching_section.dart';
 import '../profile/profile_screen.dart';
 import '../auth/login_screen.dart';
@@ -22,6 +23,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final List<Widget> _screens = [
     const HomePage(),
     const SearchScreen(),
+    const LatestReleasesScreen(),
     const WatchlistScreen(),
     const FavoritesScreen(),
   ];
@@ -37,6 +39,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             _currentIndex = index;
           });
         },
+        type: BottomNavigationBarType.fixed,
+        selectedFontSize: 12,
+        unselectedFontSize: 12,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home),
@@ -45,6 +50,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.search),
             label: 'Search',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.new_releases),
+            label: 'Latest',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.bookmark),

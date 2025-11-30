@@ -1,5 +1,5 @@
-name: anime_watcher
-description: "A Flutter anime watching application with search, watchlist, favorites, and history tracking."
+name: AniVerse
+description: "AniVerse - Your infinite universe of anime streaming"
 publish_to: 'none'
 version: 1.0.0+1
 

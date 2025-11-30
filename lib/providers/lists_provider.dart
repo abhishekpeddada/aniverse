@@ -27,6 +27,21 @@ class WatchlistNotifier extends StateNotifier<List<String>> {
     state = _storageService.getWatchlist();
   }
 
+  Future<void> syncFromFirestore() async {
+    if (_user == null) return;
+    
+    try {
+      final snapshot = await _firestoreService.getWatchlist(_user!.uid).first;
+      for (var anime in snapshot) {
+        await _storageService.addToWatchlist(anime.id);
+        await _storageService.cacheAnime(anime);
+      }
+      _loadWatchlist();
+    } catch (e) {
+      print('⚠️ Failed to sync watchlist from Firestore: $e');
+    }
+  }
+
   Future<void> addToWatchlist(String animeId) async {
     await _storageService.addToWatchlist(animeId);
     
@@ -76,6 +91,21 @@ class FavoritesNotifier extends StateNotifier<List<String>> {
 
   void _loadFavorites() {
     state = _storageService.getFavorites();
+  }
+
+  Future<void> syncFromFirestore() async {
+    if (_user == null) return;
+    
+    try {
+      final snapshot = await _firestoreService.getFavorites(_user!.uid).first;
+      for (var anime in snapshot) {
+        await _storageService.addToFavorites(anime.id);
+        await _storageService.cacheAnime(anime);
+      }
+      _loadFavorites();
+    } catch (e) {
+      print('⚠️ Failed to sync favorites from Firestore: $e');
+    }
   }
 
   Future<void> addToFavorites(String animeId) async {

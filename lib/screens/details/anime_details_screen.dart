@@ -7,7 +7,7 @@ import '../../providers/storage_provider.dart';
 import '../../models/episode_model.dart';
 import '../player/video_player_screen.dart';
 
-class AnimeDetailsScreen extends ConsumerWidget {
+class AnimeDetailsScreen extends ConsumerStatefulWidget {
   final String animeId;
   final String? continueEpisodeId;
 
@@ -18,13 +18,27 @@ class AnimeDetailsScreen extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final animeDetails = ref.watch(animeDetailsProvider(animeId));
+  ConsumerState<AnimeDetailsScreen> createState() => _AnimeDetailsScreenState();
+}
+
+class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final animeDetails = ref.watch(animeDetailsProvider(widget.animeId));
     final watchlist = ref.watch(watchlistProvider);
     final favorites = ref.watch(favoritesProvider);
     
-    final isInWatchlist = watchlist.contains(animeId);
-    final isInFavorites = favorites.contains(animeId);
+    final isInWatchlist = watchlist.contains(widget.animeId);
+    final isInFavorites = favorites.contains(widget.animeId);
     final storageService = ref.watch(storageServiceProvider);
 
     return Scaffold(
@@ -91,9 +105,9 @@ class AnimeDetailsScreen extends ConsumerWidget {
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 if (isInWatchlist) {
-                                  ref.read(watchlistProvider.notifier).removeFromWatchlist(animeId);
+                                  ref.read(watchlistProvider.notifier).removeFromWatchlist(widget.animeId);
                                 } else {
-                                  ref.read(watchlistProvider.notifier).addToWatchlist(animeId);
+                                  ref.read(watchlistProvider.notifier).addToWatchlist(widget.animeId);
                                 }
                               },
                               icon: Icon(
@@ -107,9 +121,9 @@ class AnimeDetailsScreen extends ConsumerWidget {
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 if (isInFavorites) {
-                                  ref.read(favoritesProvider.notifier).removeFromFavorites(animeId);
+                                  ref.read(favoritesProvider.notifier).removeFromFavorites(widget.animeId);
                                 } else {
-                                  ref.read(favoritesProvider.notifier).addToFavorites(animeId);
+                                  ref.read(favoritesProvider.notifier).addToFavorites(widget.animeId);
                                 }
                               },
                               icon: Icon(
@@ -177,6 +191,32 @@ class AnimeDetailsScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
+                      // Episode Search
+                      TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: 'Search episodes...',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() => _searchQuery = '');
+                                  },
+                                )
+                              : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[900],
+                        ),
+                        onChanged: (value) {
+                          setState(() => _searchQuery = value.toLowerCase());
+                        },
+                      ),
+                      const SizedBox(height: 12),
                     ],
                   ),
                 ),
@@ -184,8 +224,18 @@ class AnimeDetailsScreen extends ConsumerWidget {
               SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
-                    final episode = episodes[index];
-                    final isNextToWatch = episode.id == continueEpisodeId;
+                    // Filter episodes
+                    final filteredEpisodes = episodes.where((ep) {
+                      if (_searchQuery.isEmpty) return true;
+                      final epNum = ep.number.toString();
+                      final epTitle = ep.title?.toLowerCase() ?? '';
+                      return epNum.contains(_searchQuery) || epTitle.contains(_searchQuery);
+                    }).toList();
+                    
+                    if (index >= filteredEpisodes.length) return null;
+                    
+                    final episode = filteredEpisodes[index];
+                    final isNextToWatch = episode.id == widget.continueEpisodeId;
                     
                     return Container(
                       color: isNextToWatch ? Colors.red.withOpacity(0.15) : null,
@@ -211,7 +261,7 @@ class AnimeDetailsScreen extends ConsumerWidget {
                             MaterialPageRoute(
                               builder: (_) => VideoPlayerScreen(
                                 episodeId: episode.id,
-                                animeId: animeId,
+                                animeId: widget.animeId,
                                 animeTitle: anime.title,
                                 animeImage: anime.image,
                                 episodeNumber: episode.number,
@@ -222,7 +272,7 @@ class AnimeDetailsScreen extends ConsumerWidget {
                       ),
                     );
                   },
-                  childCount: episodes.length,
+                  childCount: null, // Dynamic based on filter
                 ),
               ),
             ],

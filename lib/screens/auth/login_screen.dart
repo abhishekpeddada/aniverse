@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../services/auth_service.dart';
 import '../../providers/auth_provider.dart';
-import '../profile/profile_screen.dart';
+import '../../providers/history_provider.dart';
+import '../../providers/lists_provider.dart';
 import '../home/home_screen.dart';
+
 
 class LoginScreen extends ConsumerWidget {
   const LoginScreen({super.key});
@@ -47,12 +50,14 @@ class LoginScreen extends ConsumerWidget {
                 onPressed: () async {
                   try {
                     final credential = await authService.signInWithGoogle();
+                    
                     if (credential != null && context.mounted) {
-                      // Navigate to ProfileScreen on success, replacing LoginScreen
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                      );
+                      // Sync all data from Firestore after login
+                      ref.read(historyProvider.notifier).syncFromFirestore();
+                      ref.read(watchlistProvider.notifier).syncFromFirestore();
+                      ref.read(favoritesProvider.notifier).syncFromFirestore();
+                      
+                      Navigator.pop(context);
                     }
                   } catch (e) {
                     if (context.mounted) {

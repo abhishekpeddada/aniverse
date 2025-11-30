@@ -22,8 +22,20 @@ final animeDetailsProvider = FutureProvider.family<Map<String, dynamic>?, String
   return await apiService.getAnimeInfo(animeId);
 });
 
-// Episode Sources Provider
+// Episode Sources Provider (legacy - uses 'sub' by default)
 final episodeSourcesProvider = FutureProvider.family<Map<String, dynamic>?, String>((ref, episodeId) async {
   final apiService = ref.watch(animeApiServiceProvider);
   return await apiService.getEpisodeSources(episodeId);
+});
+
+// Episode Sources Provider with Translation Type
+final episodeSourcesWithTypeProvider = FutureProvider.family<Map<String, dynamic>?, ({String episodeId, String translationType})>((ref, params) async {
+  final apiService = ref.watch(animeApiServiceProvider);
+  return await apiService.getEpisodeSources(params.episodeId, translationType: params.translationType);
+});
+
+// Latest Releases Provider
+final latestReleasesProvider = FutureProvider.family<List<Map<String, dynamic>>, int>((ref, page) async {
+  final apiService = ref.watch(animeApiServiceProvider);
+  return await apiService.getLatestReleases(page: page);
 });

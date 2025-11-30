@@ -12,6 +12,7 @@ import '../../providers/anime_provider.dart';
 import '../../providers/history_provider.dart';
 import '../../providers/storage_provider.dart';
 import '../../models/watch_history_model.dart';
+import 'widgets/quality_selector.dart';
 
 class VideoPlayerScreen extends ConsumerStatefulWidget {
   final String episodeId;
@@ -41,6 +42,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   String? errorMessage;
   BoxFit _fit = BoxFit.contain; // Default fit mode
 
+  // Source & Quality State
+  List<Map<String, dynamic>> _availableSources = [];
+  int _currentSourceIndex = 0;
+  String _translationType = 'sub'; // 'sub' or 'dub'
+
   // Gesture State
   double _volume = 0.5;
   double _brightness = 0.5;
@@ -48,6 +54,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   IconData? _feedbackIcon;
   String? _feedbackText;
   Timer? _feedbackTimer;
+  
+  // Seek gesture state
+  double? _seekStartPosition;
+  Duration? _seekTargetPosition;
+  bool _isSeeking = false;
   
   // Drag State
   bool _isDragging = false;
@@ -162,20 +173,26 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
 
   Future<void> _initializePlayer() async {
     try {
-      debugPrint('🎬 Fetching fresh video sources for: ${widget.episodeId}');
+      debugPrint('🎬 Fetching video sources for: ${widget.episodeId} (type: $_translationType)');
       
-      final sources = await ref.read(episodeSourcesProvider(widget.episodeId).future);
+      final sources = await ref.read(episodeSourcesWithTypeProvider((
+        episodeId: widget.episodeId,
+        translationType: _translationType,
+      )).future);
       
       if (sources == null || sources['sources'] == null || (sources['sources'] as List).isEmpty) {
         setState(() {
           hasError = true;
-          errorMessage = 'No video sources available';
+          errorMessage = 'No video sources available for $_translationType';
         });
         return;
       }
 
-      final videoUrl = sources['sources'][0]['url'];
-      debugPrint('🎥 Playing URL: ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
+      _availableSources = List<Map<String, dynamic>>.from(sources['sources'] as List);
+      debugPrint('✅ Loaded ${_availableSources.length} sources');
+
+      final videoUrl = _availableSources[_currentSourceIndex]['url'];
+      debugPrint('🎥 Playing URL (source ${_currentSourceIndex + 1}/${_availableSources.length}): ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
       
       if (defaultTargetPlatform == TargetPlatform.linux) {
         debugPrint('🐧 Launching mpv on Linux');
@@ -198,15 +215,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
         await Future.delayed(const Duration(milliseconds: 500));
         
         if (mounted) {
-          Navigator.pop(context);
+          Navigator.of(context).pop();
         }
         return;
       }
-      
-      final storageService = ref.read(storageServiceProvider);
-      // Get history for this specific episode
-      final history = storageService.getEpisodeHistory(widget.animeId, widget.episodeId);
-      
+
       await player.open(
         Media(videoUrl,
           httpHeaders: {
@@ -215,21 +228,27 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
             'Origin': 'https://allanime.to',
           },
         ),
+        play: false,
       );
+
+      final storage = ref.read(storageServiceProvider);
+      final savedHistory = storage.getEpisodeHistory(widget.animeId, widget.episodeId);
       
-      debugPrint('✅ Video player initialized successfully');
-      
+      if (savedHistory != null && savedHistory.position > Duration.zero) {
+        final resumePosition = savedHistory.position;
+        debugPrint('⏩ Resuming from: ${resumePosition.inMinutes}:${(resumePosition.inSeconds % 60).toString().padLeft(2, '0')}');
+        await player.seek(resumePosition);
+      }
+
+      player.play();
+
+
       setState(() {
         isInitialized = true;
       });
-
-      if (history != null && history.position.inSeconds > 0) {
-        debugPrint('⏩ Resuming from ${history.position.inMinutes}:${history.position.inSeconds % 60}');
-        await player.seek(history.position);
-      }
     } catch (e, stackTrace) {
-      debugPrint('❌ Failed to load video: $e');
-      debugPrint('📍 Stack: $stackTrace');
+      debugPrint('❌ Error initializing player: $e');
+      debugPrint('📍 Stack trace: $stackTrace');
       setState(() {
         hasError = true;
         errorMessage = 'Failed to load video: $e';
@@ -244,6 +263,51 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
         _saveWatchHistory(position, duration);
       }
     });
+  }
+
+  Future<void> _switchSource(int newIndex) async {
+    if (newIndex == _currentSourceIndex || newIndex >= _availableSources.length) return;
+    
+    debugPrint('🔄 Switching to source $newIndex');
+    final currentPosition = player.state.position;
+    
+    setState(() {
+      _currentSourceIndex = newIndex;
+    });
+
+    final videoUrl = _availableSources[_currentSourceIndex]['url'];
+    await player.open(
+      Media(videoUrl,
+        httpHeaders: {
+          'Referer': 'https://allanime.to',
+          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+          'Origin': 'https://allanime.to',
+        },
+      ),
+      play: false,
+    );
+    await player.seek(currentPosition);
+    player.play();
+  }
+
+  Future<void> _toggleTranslationType() async {
+    debugPrint('🔄 Toggling translation type');
+    final currentPosition = player.state.position;
+    final newType = _translationType == 'sub' ? 'dub' : 'sub';
+    
+    setState(() {
+      _translationType = newType;
+      _currentSourceIndex = 0; // Reset to first source
+      isInitialized = false;
+    });
+
+    // Reload sources and player
+    await _initializePlayer();
+    
+    // Seek to previous position if player initialized successfully
+    if (isInitialized && currentPosition > Duration.zero) {
+      await player.seek(currentPosition);
+    }
   }
 
   void _saveWatchHistory(Duration position, Duration duration) {
@@ -343,7 +407,55 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                     normal: MaterialVideoControlsThemeData(
                       padding: const EdgeInsets.only(left: 16, right: 16, bottom: 20),
                       topButtonBar: [
+                        // Sub/Dub Toggle
+                        // Always show sub/dub button
+                          MaterialCustomButton(
+                            onPressed: _toggleTranslationType,
+                            icon: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black45,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                _translationType.toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        // Quality Selector
+                        if (_availableSources.length > 1)
+                          MaterialCustomButton(
+                            onPressed: () {
+                              QualitySelector.show(
+                                context: context,
+                                sources: _availableSources,
+                                currentIndex: _currentSourceIndex,
+                                onQualitySelected: _switchSource,
+                              );
+                            },
+                            icon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.hd, color: Colors.white, size: 20),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _availableSources[_currentSourceIndex]['quality'] as String,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         const Spacer(),
+                        // Fit/Zoom Toggle
                         MaterialCustomButton(
                           onPressed: () {
                             setState(() {
@@ -387,7 +499,55 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                     fullscreen: MaterialVideoControlsThemeData(
                       padding: const EdgeInsets.only(left: 16, right: 16, bottom: 20),
                       topButtonBar: [
+                        // Sub/Dub Toggle
+                        // Always show sub/dub button
+                          MaterialCustomButton(
+                            onPressed: _toggleTranslationType,
+                            icon: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black45,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                _translationType.toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        // Quality Selector
+                        if (_availableSources.length > 1)
+                          MaterialCustomButton(
+                            onPressed: () {
+                              QualitySelector.show(
+                                context: context,
+                                sources: _availableSources,
+                                currentIndex: _currentSourceIndex,
+                                onQualitySelected: _switchSource,
+                              );
+                            },
+                            icon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.hd, color: Colors.white, size: 20),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _availableSources[_currentSourceIndex]['quality'] as String,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         const Spacer(),
+                        // Fit/Zoom Toggle
                         MaterialCustomButton(
                           onPressed: () {
                             setState(() {
@@ -438,57 +598,83 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                     ),
                   ),
 
-                  // 2. Gesture Detector - Limited to center area to not block controls
+                  // 2. Gesture Controls Overlay (volume, brightness, seek)
                   Positioned.fill(
-                    top: 60, // Avoid top button bar
-                    bottom: 100, // Avoid bottom controls
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                      onPanStart: (details) {
+                      // Horizontal drag for seeking
+                      onHorizontalDragStart: (details) {
+                        final position = player.state.position;
+                        setState(() {
+                          _seekStartPosition = details.globalPosition.dx;
+                          _seekTargetPosition = position;
+                          _isSeeking = true;
+                        });
+                      },
+                      onHorizontalDragUpdate: (details) {
+                        if (_seekStartPosition != null && _seekTargetPosition != null) {
+                          final dragDistance = details.globalPosition.dx - _seekStartPosition!;
+                          final seekAmount = (dragDistance / MediaQuery.of(context).size.width) * 90; // 90 seconds per full screen width
+                          
+                          final newPosition = _seekTargetPosition! + Duration(seconds: seekAmount.round());
+                          final duration = player.state.duration;
+                          
+                          setState(() {
+                            _seekTargetPosition = Duration(
+                              milliseconds: newPosition.inMilliseconds.clamp(0, duration.inMilliseconds),
+                            );
+                            _feedbackIcon = seekAmount > 0 ? Icons.fast_forward : Icons.fast_rewind;
+                            _feedbackText = '${_seekTargetPosition!.inMinutes}:${(_seekTargetPosition!.inSeconds % 60).toString().padLeft(2, '0')}';
+                          });
+                        }
+                      },
+                      onHorizontalDragEnd: (details) async {
+                        if (_seekTargetPosition != null) {
+                          await player.seek(_seekTargetPosition!);
+                        }
+                        setState(() {
+                          _isSeeking = false;
+                          _seekStartPosition = null;
+                          _seekTargetPosition = null;
+                        });
+                        
+                        // Hide feedback after a short delay
+                        _feedbackTimer?.cancel();
+                        _feedbackTimer = Timer(const Duration(milliseconds: 500), () {
+                          if (mounted) {
+                            setState(() {
+                              _feedbackIcon = null;
+                              _feedbackText = null;
+                            });
+                          }
+                        });
+                      },
+                      onVerticalDragStart: (details) {
                         _isDragging = true;
                         _dragStartVolume = _volume;
                         _dragStartBrightness = _brightness;
-                        _dragStartPosition = player.state.position;
-                        _targetSeekPosition = _dragStartPosition;
                       },
-                      onPanUpdate: (details) {
-                        if (details.delta.dx.abs() > details.delta.dy.abs()) {
-                          // Horizontal -> Seek
-                          final seekDelta = Duration(milliseconds: (details.delta.dx * 500).toInt());
-                          _targetSeekPosition += seekDelta;
-                          
-                          if (_targetSeekPosition < Duration.zero) _targetSeekPosition = Duration.zero;
-                          if (_targetSeekPosition > player.state.duration) _targetSeekPosition = player.state.duration;
-                          
-                          setState(() {
-                            _showFeedback = true;
-                            _feedbackIcon = seekDelta.isNegative ? Icons.fast_rewind : Icons.fast_forward;
-                            _feedbackText = _formatDuration(_targetSeekPosition);
-                          });
+                      onVerticalDragUpdate: (details) {
+                        // Vertical -> Volume/Brightness
+                        final width = MediaQuery.of(context).size.width;
+                        final dx = details.globalPosition.dx;
+                        final delta = -details.delta.dy / 200;
+                        
+                        if (dx > width / 2) {
+                          _handleVolumeDrag(delta);
                         } else {
-                          // Vertical -> Volume/Brightness
-                          final width = MediaQuery.of(context).size.width;
-                          final dx = details.globalPosition.dx;
-                          final delta = -details.delta.dy / 200;
-                          
-                          if (dx > width / 2) {
-                            _handleVolumeDrag(delta);
-                          } else {
-                            _handleBrightnessDrag(delta);
-                          }
+                          _handleBrightnessDrag(delta);
                         }
                       },
-                      onPanEnd: (details) async {
+                      onVerticalDragEnd: (details) {
                         _isDragging = false;
-                        if (_targetSeekPosition != _dragStartPosition) {
-                          await player.seek(_targetSeekPosition);
-                        }
                         
                         _feedbackTimer?.cancel();
                         _feedbackTimer = Timer(const Duration(milliseconds: 500), () {
                           if (mounted) {
                             setState(() {
-                              _showFeedback = false;
+                              _feedbackIcon = null;
+                              _feedbackText = null;
                             });
                           }
                         });
@@ -505,9 +691,30 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                     ),
                   ),
 
-                  // 3. Feedback Overlay
-                  if (_showFeedback)
+                  // Feedback overlay for seek
+                  if (_isSeeking && _feedbackIcon != null && _feedbackText != null)
                     Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.8),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_feedbackIcon, color: Colors.white, size: 48),
+                            const SizedBox(height: 8),
+                            Text(
+                              _feedbackText ?? '',
+                              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // Transient feedback overlay (for volume/brightness)
+                  if (!_isSeeking && _feedbackIcon != null && _feedbackText != null)                  Center(
                       child: Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(

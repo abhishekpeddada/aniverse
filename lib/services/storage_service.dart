@@ -137,6 +137,31 @@ class StorageService {
     return result;
   }
 
+  // Delete all history for a specific anime
+  Future<void> deleteAnimeHistory(String animeId) async {
+    final box = Hive.box<WatchHistory>(_historyBox);
+    final keysToDelete = <String>[];
+    
+    // Find all keys for this anime
+    for (var key in box.keys) {
+      final history = box.get(key);
+      if (history != null && history.animeId == animeId) {
+        keysToDelete.add(key as String);
+      }
+    }
+    
+    // Delete all found entries
+    for (var key in keysToDelete) {
+      await box.delete(key);
+    }
+  }
+
+  // Clear all watch history
+  Future<void> clearAllHistory() async {
+    final box = Hive.box<WatchHistory>(_historyBox);
+    await box.clear();
+  }
+
   // Anime cache operations
   Future<void> cacheAnime(Anime anime) async {
     final box = Hive.box<Anime>(_animeBox);
