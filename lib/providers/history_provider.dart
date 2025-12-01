@@ -44,12 +44,12 @@ class HistoryNotifier extends StateNotifier<List<WatchHistory>> {
   }
 
 
-  Future<void> saveHistory(WatchHistory history) async {
+  Future<void> saveHistory(WatchHistory history, {bool syncToCloud = true}) async {
     // Always save locally
     await _storageService.saveWatchHistory(history);
     
-    // Sync to Firestore if user is logged in
-    if (_user != null) {
+    // Sync to Firestore if user is logged in and sync is requested
+    if (syncToCloud && _user != null) {
       try {
         await _firestoreService.syncWatchHistory(_user!.uid, history);
       } catch (e) {

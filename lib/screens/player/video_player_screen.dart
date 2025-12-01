@@ -172,6 +172,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       if (player.state.playing) {
         player.pause();
       }
+      // Sync history to cloud when app goes to background
+      final position = player.state.position;
+      final duration = player.state.duration;
+      if (duration.inSeconds > 0) {
+        _saveWatchHistory(position, duration, syncToCloud: true);
+      }
     }
   }
 
@@ -264,6 +270,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       }
 
       await player.play();
+
+      // Sync history immediately when playback starts (without position)
+      _saveWatchHistory(
+        savedHistory?.position ?? Duration.zero, 
+        player.state.duration, 
+        syncToCloud: true
+      );
 
       setState(() {
         isInitialized = true;
@@ -376,7 +389,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     }
   }
 
-  void _saveWatchHistory(Duration position, Duration duration) {
+  void _saveWatchHistory(Duration position, Duration duration, {bool syncToCloud = false}) {
     final history = WatchHistory(
       animeId: widget.animeId,
       animeTitle: widget.animeTitle,
@@ -388,7 +401,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       lastWatched: DateTime.now(),
     );
     
-    ref.read(historyProvider.notifier).saveHistory(history);
+    ref.read(historyProvider.notifier).saveHistory(history, syncToCloud: syncToCloud);
   }
 
   @override

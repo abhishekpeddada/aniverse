@@ -24,10 +24,10 @@ class FirestoreService {
         'animeImage': history.animeImage,
         'episodeNumber': history.episodeNumber,
         'episodeId': history.episodeId,
-        'positionMs': history.positionMs,
+        // 'positionMs': history.positionMs, // User requested to NOT sync position to cloud
         'durationMs': history.durationMs,
         'lastWatched': history.lastWatched.toIso8601String(),
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
       debugPrint('❌ Failed to sync watch history: $e');
     }
