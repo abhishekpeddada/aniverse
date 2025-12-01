@@ -71,9 +71,7 @@ class HistoryNotifier extends StateNotifier<List<WatchHistory>> {
     // Also delete from Firestore if user is logged in
     if (_user != null) {
       try {
-        // Note: Would need to implement deleteAnimeHistory in FirestoreService
-        // For now, just log
-        debugPrint('TODO: Delete anime $animeId from Firestore');
+        await _firestoreService.deleteWatchHistory(_user!.uid, animeId);
       } catch (e) {
         debugPrint('⚠️ Failed to delete from Firestore: $e');
       }

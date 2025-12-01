@@ -24,12 +24,20 @@ class FirestoreService {
         'animeImage': history.animeImage,
         'episodeNumber': history.episodeNumber,
         'episodeId': history.episodeId,
-        // 'positionMs': history.positionMs, // User requested to NOT sync position to cloud
+        // 'positionMs': history.positionMs
         'durationMs': history.durationMs,
         'lastWatched': history.lastWatched.toIso8601String(),
       }, SetOptions(merge: true));
     } catch (e) {
       debugPrint('❌ Failed to sync watch history: $e');
+    }
+  }
+  
+  Future<void> deleteWatchHistory(String userId, String animeId) async {
+    try {
+      await _getUserCollection(userId, 'watchHistory').doc(animeId).delete();
+    } catch (e) {
+      debugPrint('❌ Failed to delete watch history: $e');
     }
   }
 
