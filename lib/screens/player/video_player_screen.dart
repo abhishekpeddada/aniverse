@@ -116,6 +116,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       if (mounted) {
         setState(() {
           _showFeedback = false;
+          _feedbackIcon = null;
+          _feedbackText = null;
         });
       }
     });
