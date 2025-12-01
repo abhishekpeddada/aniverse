@@ -382,8 +382,21 @@ class AnimeApiService {
       }
       
       String result = decoded.toString();
+      
+      // Fix clock.json
       if (result.contains('/clock')) {
         result = result.replaceAll('/clock', '/clock.json');
+      }
+      
+      // Handle wixmp proxy (extract real URL)
+      // Matches ani-cli: sed 's|repackager.wixmp.com/||g;s|\.urlset.*||g'
+      if (result.contains('repackager.wixmp.com/')) {
+        result = result.replaceAll('repackager.wixmp.com/', '');
+        final urlsetIndex = result.indexOf('.urlset');
+        if (urlsetIndex != -1) {
+          result = result.substring(0, urlsetIndex);
+        }
+        debugPrint('🔗 Extracted wixmp URL: $result');
       }
       
       return result;

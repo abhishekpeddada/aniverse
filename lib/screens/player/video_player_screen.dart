@@ -66,6 +66,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   double _dragStartBrightness = 0.5;
   Duration _dragStartPosition = Duration.zero;
   Duration _targetSeekPosition = Duration.zero;
+  DateTime? _lastSeekTime; // To prevent error triggering during seek
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -152,6 +153,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     if (newPos < Duration.zero) newPos = Duration.zero;
     if (newPos > duration) newPos = duration;
     
+    if (newPos > duration) newPos = duration;
+    
+    _lastSeekTime = DateTime.now();
     await player.seek(newPos);
     
     _showGestureFeedback(
@@ -191,32 +195,53 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       _availableSources = List<Map<String, dynamic>>.from(sources['sources'] as List);
       debugPrint('✅ Loaded ${_availableSources.length} sources');
 
+      await _playCurrentSource();
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error initializing player: $e');
+      debugPrint('📍 Stack trace: $stackTrace');
+      setState(() {
+        hasError = true;
+        errorMessage = 'Failed to load video: $e';
+      });
+    }
+  }
+
+  Future<void> _playCurrentSource() async {
+    if (_currentSourceIndex >= _availableSources.length) {
+      setState(() {
+        hasError = true;
+        errorMessage = 'All video sources failed';
+      });
+      return;
+    }
+
+    try {
       final videoUrl = _availableSources[_currentSourceIndex]['url'];
       debugPrint('🎥 Playing URL (source ${_currentSourceIndex + 1}/${_availableSources.length}): ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
       
+      setState(() {
+        hasError = false;
+        errorMessage = null;
+        isInitialized = false; // Show loading indicator
+        _hasPlayedSuccessfully = false; // Reset success flag for new source
+      });
+
       if (defaultTargetPlatform == TargetPlatform.linux) {
+        // ... Linux specific code (omitted for brevity, assuming it handles its own errors or we wrap it)
+        // For now, keeping existing Linux logic but wrapping in try-catch
         debugPrint('🐧 Launching mpv on Linux');
-        
-        setState(() {
-          errorMessage = 'Launching mpv player...';
-        });
-        
+        await player.stop(); // Ensure internal player is stopped
         final mpvProcess = await Process.start('mpv', [
           '--http-header-fields=Referer: https://allanime.to',
           '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
           '--title=Anime Watcher - ${widget.animeTitle} Episode ${widget.episodeNumber}',
           videoUrl,
         ]);
-        
         mpvProcess.exitCode.then((code) {
-          debugPrint('🛑 mpv exited with code: $code');
+          if (code != 0) _playNextSource();
         });
-        
         await Future.delayed(const Duration(milliseconds: 500));
-        
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
+        if (mounted) Navigator.of(context).pop();
         return;
       }
 
@@ -235,33 +260,86 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       final savedHistory = storage.getEpisodeHistory(widget.animeId, widget.episodeId);
       
       if (savedHistory != null && savedHistory.position > Duration.zero) {
-        final resumePosition = savedHistory.position;
-        debugPrint('⏩ Resuming from: ${resumePosition.inMinutes}:${(resumePosition.inSeconds % 60).toString().padLeft(2, '0')}');
-        await player.seek(resumePosition);
+        await player.seek(savedHistory.position);
       }
 
-      player.play();
-
+      await player.play();
 
       setState(() {
         isInitialized = true;
       });
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error initializing player: $e');
-      debugPrint('📍 Stack trace: $stackTrace');
+      
+    } catch (e) {
+      debugPrint('❌ Error playing source $_currentSourceIndex: $e');
+      _playNextSource();
+    }
+  }
+
+  void _playNextSource() {
+    debugPrint('⚠️ Source $_currentSourceIndex failed, trying next...');
+    if (_currentSourceIndex + 1 < _availableSources.length) {
+      _currentSourceIndex++;
+      _playCurrentSource();
+    } else {
+      player.stop(); // Stop playback to prevent audio ghosting
       setState(() {
         hasError = true;
-        errorMessage = 'Failed to load video: $e';
+        errorMessage = 'Unable to play video. All sources failed.';
+        isInitialized = true; // Stop loading indicator to show error
       });
     }
   }
 
+  bool _hasPlayedSuccessfully = false; // Track if current source is valid
+
   void _setupPositionListener() {
     player.stream.position.listen((position) {
       final duration = player.state.duration;
-      if (duration.inSeconds > 0 && position.inSeconds % 5 == 0) {
-        _saveWatchHistory(position, duration);
+      if (duration.inSeconds > 0) {
+        // Mark as successfully played if we've played for more than 2 seconds
+        if (!_hasPlayedSuccessfully && position.inSeconds > 2) {
+          _hasPlayedSuccessfully = true;
+          debugPrint('✅ Source marked as valid (played > 2s)');
+        }
+        
+        if (position.inSeconds % 5 == 0) {
+          _saveWatchHistory(position, duration);
+        }
       }
+    });
+    
+    player.stream.error.listen((error) {
+      debugPrint('❌ Player error: $error');
+      
+      // If we haven't played successfully yet, assume source is bad and switch
+      if (!_hasPlayedSuccessfully) {
+        debugPrint('⚠️ Source failed at start, switching...');
+        _playNextSource();
+        return;
+      }
+
+      // If we HAVE played successfully, this is likely a network/seek error.
+      // Do NOT switch source automatically. Just notify user and try to resume.
+      debugPrint('⚠️ Error during playback/seek. Retrying...');
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Buffering error. Waiting...'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Next Source',
+            onPressed: _playNextSource,
+            textColor: Colors.yellow,
+          ),
+        ),
+      );
+      
+      // Attempt to resume after a short delay
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted && !player.state.playing) {
+          player.play();
+        }
+      });
     });
   }
 
@@ -269,25 +347,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     if (newIndex == _currentSourceIndex || newIndex >= _availableSources.length) return;
     
     debugPrint('🔄 Switching to source $newIndex');
-    final currentPosition = player.state.position;
+    // final currentPosition = player.state.position; // Optional: preserve position
     
     setState(() {
       _currentSourceIndex = newIndex;
     });
 
-    final videoUrl = _availableSources[_currentSourceIndex]['url'];
-    await player.open(
-      Media(videoUrl,
-        httpHeaders: {
-          'Referer': 'https://allanime.to',
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-          'Origin': 'https://allanime.to',
-        },
-      ),
-      play: false,
-    );
-    await player.seek(currentPosition);
-    player.play();
+    await _playCurrentSource();
   }
 
   Future<void> _toggleTranslationType() async {
@@ -630,6 +696,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                       },
                       onHorizontalDragEnd: (details) async {
                         if (_seekTargetPosition != null) {
+                          _lastSeekTime = DateTime.now();
                           await player.seek(_seekTargetPosition!);
                         }
                         setState(() {
