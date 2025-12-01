@@ -6,6 +6,7 @@ import '../../providers/lists_provider.dart';
 import '../../providers/storage_provider.dart';
 import '../../models/episode_model.dart';
 import '../player/video_player_screen.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 
 class AnimeDetailsScreen extends ConsumerStatefulWidget {
   final String animeId;
@@ -177,9 +178,9 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
+                        HtmlWidget(
                           anime.description!,
-                          style: TextStyle(color: Colors.grey[300]),
+                          textStyle: TextStyle(color: Colors.grey[300]),
                         ),
                         const SizedBox(height: 24),
                       ],
