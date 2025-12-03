@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/anime_model.dart';
 import '../services/anime_api_service.dart';
+import 'auth_provider.dart';
 
 // API Service Provider
 final animeApiServiceProvider = Provider((ref) => AnimeApiService());
@@ -13,7 +14,10 @@ final searchResultsProvider = FutureProvider<List<Anime>>((ref) async {
   if (query.isEmpty) return [];
   
   final apiService = ref.watch(animeApiServiceProvider);
-  return await apiService.searchAnime(query);
+  final prefs = ref.watch(userPreferencesProvider).valueOrNull;
+  final allowAdult = prefs?['allowAdult'] as bool? ?? false;
+  
+  return await apiService.searchAnime(query, allowAdult: allowAdult);
 });
 
 // Anime Details Provider
@@ -35,7 +39,14 @@ final episodeSourcesWithTypeProvider = FutureProvider.family<Map<String, dynamic
 });
 
 // Latest Releases Provider
-final latestReleasesProvider = FutureProvider.family<List<Map<String, dynamic>>, int>((ref, page) async {
+final latestReleasesProvider = FutureProvider.family<List<Map<String, dynamic>>, ({int page, List<String>? genres})>((ref, params) async {
   final apiService = ref.watch(animeApiServiceProvider);
-  return await apiService.getLatestReleases(page: page);
+  final prefs = ref.watch(userPreferencesProvider).valueOrNull;
+  final allowAdult = prefs?['allowAdult'] as bool? ?? false;
+  
+  return await apiService.getLatestReleases(
+    page: params.page, 
+    allowAdult: allowAdult,
+    genres: params.genres,
+  );
 });

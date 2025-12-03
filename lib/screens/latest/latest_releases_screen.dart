@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../providers/anime_provider.dart';
+import '../../core/constants/genre_constants.dart';
 import '../details/anime_details_screen.dart';
 
 class LatestReleasesScreen extends ConsumerStatefulWidget {
@@ -13,19 +14,91 @@ class LatestReleasesScreen extends ConsumerStatefulWidget {
 
 class _LatestReleasesScreenState extends ConsumerState<LatestReleasesScreen> {
   int _currentPage = 1;
+  List<String> _selectedGenres = [];
+
+  void _showGenreFilter() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Filter by Genre',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        setModalState(() {
+                          _selectedGenres.clear();
+                        });
+                        setState(() {});
+                      },
+                      child: const Text('Clear All'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: animeGenres.map((genre) {
+                    final isSelected = _selectedGenres.contains(genre);
+                    return FilterChip(
+                      label: Text(genre),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        setModalState(() {
+                          if (selected) {
+                            _selectedGenres.add(genre);
+                          } else {
+                            _selectedGenres.remove(genre);
+                          }
+                        });
+                        setState(() {});
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Apply Filters'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final latestReleases = ref.watch(latestReleasesProvider(_currentPage));
+    final latestReleases = ref.watch(latestReleasesProvider((page: _currentPage, genres: _selectedGenres.isEmpty ? null : _selectedGenres)));
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Latest Releases'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.filter_list),
+            onPressed: _showGenreFilter,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              ref.invalidate(latestReleasesProvider(_currentPage));
+              ref.invalidate(latestReleasesProvider((page: _currentPage, genres: _selectedGenres.isEmpty ? null : _selectedGenres)));
             },
           ),
         ],
@@ -50,10 +123,32 @@ class _LatestReleasesScreenState extends ConsumerState<LatestReleasesScreen> {
 
           return Column(
             children: [
+              // Active filters
+              if (_selectedGenres.isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  color: Colors.grey[900],
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: _selectedGenres.map((genre) {
+                      return Chip(
+                        label: Text(genre, style: const TextStyle(fontSize: 12)),
+                        deleteIcon: const Icon(Icons.close, size: 16),
+                        onDeleted: () {
+                          setState(() {
+                            _selectedGenres.remove(genre);
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () async {
-                    ref.invalidate(latestReleasesProvider(_currentPage));
+                    ref.invalidate(latestReleasesProvider((page: _currentPage, genres: _selectedGenres.isEmpty ? null : _selectedGenres)));
                   },
                   child: GridView.builder(
                     padding: const EdgeInsets.all(12),
@@ -145,7 +240,7 @@ class _LatestReleasesScreenState extends ConsumerState<LatestReleasesScreen> {
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 onPressed: () {
-                  ref.invalidate(latestReleasesProvider(_currentPage));
+                  ref.invalidate(latestReleasesProvider((page: _currentPage, genres: _selectedGenres.isEmpty ? null : _selectedGenres)));
                 },
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),

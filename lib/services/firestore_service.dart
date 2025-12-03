@@ -13,6 +13,27 @@ class FirestoreService {
     return _firestore.collection('users').doc(userId).collection(collection);
   }
 
+  // User Preferences
+  Future<void> updateUserPreferences(String userId, Map<String, dynamic> prefs) async {
+    try {
+      await _firestore.collection('users').doc(userId).set({
+        'preferences': prefs,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('❌ Failed to update user preferences: $e');
+    }
+  }
+
+  Stream<Map<String, dynamic>> getUserPreferences(String userId) {
+    return _firestore.collection('users').doc(userId).snapshots().map((snapshot) {
+      if (snapshot.exists && snapshot.data() != null) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        return data['preferences'] as Map<String, dynamic>? ?? {};
+      }
+      return {};
+    });
+  }
+
   // Watch History
   Future<void> syncWatchHistory(String userId, WatchHistory history) async {
     try {

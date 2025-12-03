@@ -26,9 +26,9 @@ class AnimeApiService {
     }
   }
 
-  Future<List<Anime>> searchAnime(String query) async {
+  Future<List<Anime>> searchAnime(String query, {bool allowAdult = false}) async {
     try {
-      debugPrint('🔍 Searching anime: $query');
+      debugPrint('🔍 Searching anime: $query (adult: $allowAdult)');
       
       const searchQuery = r'''
         query($search: SearchInput) {
@@ -47,7 +47,7 @@ class AnimeApiService {
 
       final variables = {
         'search': {
-          'allowAdult': false,
+          'allowAdult': allowAdult,
           'allowUnknown': false,
           'query': query,
         },
@@ -282,9 +282,14 @@ class AnimeApiService {
     return 'Default';
   }
 
-  Future<List<Map<String, dynamic>>> getLatestReleases({int page = 1, int limit = 30}) async {
+  Future<List<Map<String, dynamic>>> getLatestReleases({
+    int page = 1, 
+    int limit = 30, 
+    bool allowAdult = false,
+    List<String>? genres,
+  }) async {
     try {
-      debugPrint('📅 Fetching latest releases (page: $page, limit: $limit)');
+      debugPrint('📅 Fetching latest releases (page: $page, limit: $limit, adult: $allowAdult, genres: $genres)');
 
       const latestQuery = r'''
         query($search: SearchInput, $limit: Int, $page: Int) {
@@ -299,12 +304,18 @@ class AnimeApiService {
         }
       ''';
 
+      final searchInput = {
+        'allowAdult': allowAdult,
+        'allowUnknown': false,
+        'sortBy': 'Latest_Update',
+      };
+      
+      if (genres != null && genres.isNotEmpty) {
+        searchInput['genres'] = genres;
+      }
+
       final variables = {
-        'search': {
-          'allowAdult': false,
-          'allowUnknown': false,
-          'sortBy': 'Latest_Update',
-        },
+        'search': searchInput,
         'limit': limit,
         'page': page,
       };
