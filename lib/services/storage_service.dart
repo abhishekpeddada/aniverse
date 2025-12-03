@@ -172,4 +172,10 @@ class StorageService {
     final box = Hive.box<Anime>(_animeBox);
     return box.get(animeId);
   }
+
+  // Clear anime cache (useful for schema migrations)
+  static Future<void> clearAnimeCache() async {
+    final box = Hive.box<Anime>(_animeBox);
+    await box.clear();
+  }
 }

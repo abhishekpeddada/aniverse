@@ -31,6 +31,9 @@ class Anime {
   @HiveField(8)
   final String? subOrDub;
 
+  @HiveField(9)
+  final String source; // 'allanime' or 'raiden'
+
   Anime({
     required this.id,
     required this.title,
@@ -41,6 +44,7 @@ class Anime {
     this.status,
     this.totalEpisodes,
     this.subOrDub,
+    this.source = 'allanime', // default to allanime
   });
 
   factory Anime.fromJson(Map<String, dynamic> json) {
@@ -56,6 +60,7 @@ class Anime {
       status: json['status'],
       totalEpisodes: json['totalEpisodes'],
       subOrDub: json['subOrDub'],
+      source: json['source'] ?? 'allanime',
     );
   }
 
@@ -70,6 +75,7 @@ class Anime {
       'status': status,
       'totalEpisodes': totalEpisodes,
       'subOrDub': subOrDub,
+      'source': source,
     };
   }
 }

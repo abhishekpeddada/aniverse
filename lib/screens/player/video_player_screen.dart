@@ -11,6 +11,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import '../../providers/anime_provider.dart';
 import '../../providers/history_provider.dart';
 import '../../providers/storage_provider.dart';
+import '../../providers/raiden_provider.dart';
 import '../../models/watch_history_model.dart';
 import 'widgets/quality_selector.dart';
 
@@ -188,6 +189,37 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
 
   Future<void> _initializePlayer() async {
     try {
+      // Check if this is a Raiden source (episodeId starts with raiden_)
+      if (widget.episodeId.startsWith('raiden_')) {
+        debugPrint('🎬 Playing Raiden content: ${widget.episodeId}');
+        
+        // Get the Raiden data from cache
+        final raidenData = ref.read(raidenAnimeDetailsProvider(widget.episodeId));
+        
+        if (raidenData != null && raidenData['download_url'] != null) {
+          final directUrl = raidenData['download_url'] as String;
+          debugPrint('✅ Got Raiden direct URL: $directUrl');
+          
+          // Play the direct MP4 URL
+          await player.open(Media(directUrl));
+          
+          setState(() {
+            isInitialized = true;
+          });
+          
+          await player.play();
+          return;
+        } else {
+          debugPrint('❌ No Raiden data found in cache');
+          setState(() {
+            hasError = true;
+            errorMessage = 'Raiden content not found in cache';
+          });
+          return;
+        }
+      }
+      
+      // Original AllAnime logic
       debugPrint('🎬 Fetching video sources for: ${widget.episodeId} (type: $_translationType)');
       
       final sources = await ref.read(episodeSourcesWithTypeProvider((

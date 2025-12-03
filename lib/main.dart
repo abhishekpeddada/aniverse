@@ -19,6 +19,14 @@ void main() async {
   // Initialize Hive storage
   await StorageService.init();
   
+  // TEMPORARY: Clear anime cache to fix schema changes
+  // This clears cached anime that don't have the new 'source' field
+  try {
+    await StorageService.clearAnimeCache();
+  } catch (e) {
+    debugPrint('Error clearing anime cache: $e');
+  }
+  
   runApp(
     const ProviderScope(
       child: MyApp(),

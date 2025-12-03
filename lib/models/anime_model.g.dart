@@ -26,13 +26,14 @@ class AnimeAdapter extends TypeAdapter<Anime> {
       status: fields[6] as String?,
       totalEpisodes: fields[7] as int?,
       subOrDub: fields[8] as String?,
+      source: fields[9] as String,
     );
   }
 
   @override
   void write(BinaryWriter writer, Anime obj) {
     writer
-      ..writeByte(9)
+      ..writeByte(10)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -50,7 +51,9 @@ class AnimeAdapter extends TypeAdapter<Anime> {
       ..writeByte(7)
       ..write(obj.totalEpisodes)
       ..writeByte(8)
-      ..write(obj.subOrDub);
+      ..write(obj.subOrDub)
+      ..writeByte(9)
+      ..write(obj.source);
   }
 
   @override
