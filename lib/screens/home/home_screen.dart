@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../search/search_screen.dart';
 import '../lists/watchlist_screen.dart';
 import '../lists/favorites_screen.dart';
-import '../lists/history_screen.dart';
 import '../latest/latest_releases_screen.dart';
 import 'widgets/continue_watching_section.dart';
 import '../profile/profile_screen.dart';
