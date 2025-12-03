@@ -287,8 +287,8 @@ class AnimeApiService {
       debugPrint('📅 Fetching latest releases (page: $page, limit: $limit)');
 
       const latestQuery = r'''
-        query($search: SearchInput, $limit: Int, $page: Int, $sortBy: SearchSortEnum) {
-          shows(search: $search, limit: $limit, page: $page, sortBy: $sortBy) {
+        query($search: SearchInput, $limit: Int, $page: Int) {
+          shows(search: $search, limit: $limit, page: $page) {
             edges {
               _id
               name
@@ -303,10 +303,10 @@ class AnimeApiService {
         'search': {
           'allowAdult': false,
           'allowUnknown': false,
+          'sortBy': 'Latest_Update',
         },
         'limit': limit,
         'page': page,
-        'sortBy': 'Latest_Update',  // Sort by most recent updates
       };
 
       final response = await _dio.get(
