@@ -74,6 +74,48 @@ class ContinueWatchingSection extends ConsumerWidget {
                   ),
                 );
               },
+              onLongPress: () async {
+                // Show confirmation dialog
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Remove from History?'),
+                    content: Text('Remove "${history.animeTitle}" from continue watching?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('Remove'),
+                      ),
+                    ],
+                  ),
+                ) ?? false;
+                
+                if (confirmed) {
+                  // Remove anime from history
+                  ref.read(historyProvider.notifier).removeAnimeHistory(history.animeId);
+                  
+                  // Show snackbar
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Removed "${history.animeTitle}" from history'),
+                        action: SnackBarAction(
+                          label: 'Undo',
+                          onPressed: () {
+                            // Re-save the history
+                            ref.read(historyProvider.notifier).saveHistory(history);
+                          },
+                        ),
+                      ),
+                    );
+                  }
+                }
+              },
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -116,6 +158,68 @@ class ContinueWatchingSection extends ConsumerWidget {
                                   color: Colors.white,
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          
+                          // Delete button (top-left)
+                          Positioned(
+                            top: 6,
+                            left: 6,
+                            child: GestureDetector(
+                              onTap: () async {
+                                // Show confirmation dialog
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Remove from History?'),
+                                    content: Text('Remove "${history.animeTitle}" from continue watching?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(true),
+                                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                        child: const Text('Remove'),
+                                      ),
+                                    ],
+                                  ),
+                                ) ?? false;
+                                
+                                if (confirmed) {
+                                  // Remove anime from history
+                                  ref.read(historyProvider.notifier).removeAnimeHistory(history.animeId);
+                                  
+                                  // Show snackbar
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Removed "${history.animeTitle}" from history'),
+                                        action: SnackBarAction(
+                                          label: 'Undo',
+                                          onPressed: () {
+                                            // Re-save the history
+                                            ref.read(historyProvider.notifier).saveHistory(history);
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.6),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  size: 16,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
