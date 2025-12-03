@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import '../models/anime_model.dart';
 import '../services/anime_api_service.dart';
 import '../services/raiden_api_service.dart';
@@ -76,9 +77,52 @@ final episodeSourcesWithTypeProvider = FutureProvider.family<Map<String, dynamic
 // Latest Releases Provider
 final latestReleasesProvider = FutureProvider.family<List<Map<String, dynamic>>, ({int page, List<String>? genres})>((ref, params) async {
   final apiService = ref.watch(animeApiServiceProvider);
+  final raidenService = ref.watch(raidenApiServiceProvider);
   final prefs = ref.watch(userPreferencesProvider).valueOrNull;
   final allowAdult = prefs?['allowAdult'] as bool? ?? false;
   
+  // Check if "Hentai" genre is selected
+  final hasHentaiFilter = params.genres?.contains('Hentai') ?? false;
+  
+  if (hasHentaiFilter && allowAdult) {
+    // Fetch from Raiden API instead of AllAnime
+    try {
+      final raidenResults = await raidenService.getAdultAnime(page: params.page);
+      
+      // Cache Raiden data for video playback
+      if (raidenResults.isNotEmpty) {
+        final raidenDataCache = ref.read(raidenAnimeDataProvider.notifier);
+        final currentCache = ref.read(raidenAnimeDataProvider);
+        final updatedCache = Map<String, Map<String, dynamic>>.from(currentCache);
+        
+        for (var raidenData in raidenResults) {
+          final anime = RaidenDataConverter.fromRaidenResult(raidenData);
+          updatedCache[anime.id] = raidenData;
+        }
+        
+        raidenDataCache.state = updatedCache;
+      }
+      
+      // Convert to format expected by UI (List<Map<String, dynamic>>)
+      return raidenResults.map((data) {
+        final anime = RaidenDataConverter.fromRaidenResult(data);
+        return {
+          'id': anime.id,
+          'title': anime.title,
+          'image': anime.image,
+          'source': 'raiden',
+          'latestEpisode': 'Movie', 
+          'hasSubbed': true,
+          'hasDubbed': false,
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching from Raiden: $e');
+      return [];
+    }
+  }
+  
+  // Original AllAnime logic for other genres
   return await apiService.getLatestReleases(
     page: params.page, 
     allowAdult: allowAdult,

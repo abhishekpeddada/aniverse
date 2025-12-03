@@ -7,7 +7,6 @@ const List<String> animeGenres = [
   'Ecchi',
   'Fantasy',
   'Harem',
-  'Hentai',
   'Historical',
   'Horror',
   'Isekai',
@@ -22,4 +21,5 @@ const List<String> animeGenres = [
   'Thriller',
   'Yaoi',
   'Yuri',
+  'Hentai',
 ];
