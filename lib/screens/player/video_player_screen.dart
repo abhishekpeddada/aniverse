@@ -80,9 +80,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     
+    // Allow all orientations for auto-rotation
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
     ]);
     
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
