@@ -39,6 +39,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           });
         },
         type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.black,
+        selectedItemColor: Colors.purpleAccent, 
+        unselectedItemColor: Colors.grey, 
         selectedFontSize: 12,
         unselectedFontSize: 12,
         items: const [
