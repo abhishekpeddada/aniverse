@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.0] - 2025-12-04
+
+### Added
+- Integrated Raiden API as a secondary source for hanime content.
+- implemented dual-source architecture to query both AllAnime and Raiden APIs.
+- Added Adult Mode toggle in Profile settings.
+- Added genre filter to Latest Releases screen with pagination and caching.
+- Added source badges (Raiden/AllAnime) to search results.
+
+### Changed
+- Updated bottom navigation bar background color to pitch black.
+- Modified Latest Releases to support content without episode numbers.
+- Updated video player to handle direct video URLs without API fetching.
+
+### Fixed
+- Fixed app crash on startup caused by Hive schema changes.
+- Fixed video player failing to play Raiden content by using cached download URLs.
+- Fixed grey boxes in Latest Releases by providing default values for missing fields.
+
 ## [1.0.0] - 2025-12-01
 
 ### Added
