@@ -49,24 +49,25 @@ class ProfileScreen extends ConsumerWidget {
                     ),
               ),
               const SizedBox(height: 48),
-              
+
               //Adult Content Toggle
               Consumer(
                 builder: (context, ref, _) {
                   final prefs = ref.watch(userPreferencesProvider);
                   final user = ref.watch(currentUserProvider);
                   final firestoreService = ref.watch(firestoreServiceProvider);
-                  
+
                   if (user == null) return const SizedBox.shrink();
-                  
+
                   return prefs.when(
                     data: (data) {
                       final allowAdult = data['allowAdult'] as bool? ?? false;
-                      
+
                       return Card(
                         child: SwitchListTile(
                           title: const Text('Adult Content'),
-                          subtitle: const Text('Enable adult content from multiple sources'),
+                          subtitle: const Text(
+                              'Enable adult content from multiple sources'),
                           value: allowAdult,
                           onChanged: (value) async {
                             if (value) {
@@ -80,23 +81,27 @@ class ProfileScreen extends ConsumerWidget {
                                   ),
                                   actions: [
                                     TextButton(
-                                      onPressed: () => Navigator.pop(context, false),
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
                                       child: const Text('Cancel'),
                                     ),
                                     TextButton(
-                                      onPressed: () => Navigator.pop(context, true),
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
                                       child: const Text('Enable'),
                                     ),
                                   ],
                                 ),
                               );
-                              
+
                               if (confirmed == true) {
-                                await firestoreService.updateUserPreferences(user.uid, {'allowAdult': true});
+                                await firestoreService.updateUserPreferences(
+                                    user.uid, {'allowAdult': true});
                               }
                             } else {
                               // Disable without confirmation
-                              await firestoreService.updateUserPreferences(user.uid, {'allowAdult': false});
+                              await firestoreService.updateUserPreferences(
+                                  user.uid, {'allowAdult': false});
                             }
                           },
                         ),
@@ -112,9 +117,45 @@ class ProfileScreen extends ConsumerWidget {
                   );
                 },
               ),
-              
+
+              Card(
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    final prefs = ref.watch(userPreferencesProvider);
+                    final user = ref.watch(currentUserProvider);
+                    final firestoreService =
+                        ref.watch(firestoreServiceProvider);
+
+                    if (user == null) return const SizedBox.shrink();
+
+                    return prefs.when(
+                      data: (data) {
+                        final autoRotateEnabled =
+                            data['autoRotateEnabled'] as bool? ?? true;
+
+                        return SwitchListTile(
+                          title: const Text('Auto-Rotate Video'),
+                          subtitle: const Text(
+                              'Automatically rotate video based on device orientation'),
+                          value: autoRotateEnabled,
+                          onChanged: (value) async {
+                            await firestoreService.updateUserPreferences(
+                                user.uid, {'autoRotateEnabled': value});
+                          },
+                        );
+                      },
+                      loading: () => const ListTile(
+                        title: Text('Auto-Rotate Video'),
+                        trailing: CircularProgressIndicator(),
+                      ),
+                      error: (_, __) => const SizedBox.shrink(),
+                    );
+                  },
+                ),
+              ),
+
               const SizedBox(height: 24),
-              
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(

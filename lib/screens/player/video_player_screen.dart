@@ -8,10 +8,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:native_device_orientation/native_device_orientation.dart';
 import '../../providers/anime_provider.dart';
 import '../../providers/history_provider.dart';
 import '../../providers/storage_provider.dart';
 import '../../providers/raiden_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../services/firestore_service.dart';
 import '../../models/watch_history_model.dart';
 import 'widgets/quality_selector.dart';
 
@@ -35,7 +38,8 @@ class VideoPlayerScreen extends ConsumerStatefulWidget {
   ConsumerState<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
 }
 
-class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with WidgetsBindingObserver {
+class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
+    with WidgetsBindingObserver {
   late final Player player;
   late final VideoController controller;
   bool isInitialized = false;
@@ -55,19 +59,23 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   IconData? _feedbackIcon;
   String? _feedbackText;
   Timer? _feedbackTimer;
-  
+
   // Seek gesture state
   double? _seekStartPosition;
   Duration? _seekTargetPosition;
   bool _isSeeking = false;
-  
+
   // Drag State
   bool _isDragging = false;
   double _dragStartVolume = 0.5;
   double _dragStartBrightness = 0.5;
   Duration _dragStartPosition = Duration.zero;
   Duration _targetSeekPosition = Duration.zero;
-  DateTime? _lastSeekTime; // To prevent error triggering during seek
+  DateTime? _lastSeekTime;
+
+  bool _autoRotateEnabled = true;
+  StreamSubscription<NativeDeviceOrientation>?
+      _orientationSubscription; // To prevent error triggering during seek
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -80,23 +88,92 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
-    // Allow all orientations for auto-rotation
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    
+
+    _loadAutoRotatePreference();
+    _setupOrientationListener();
+
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     player = Player();
     controller = VideoController(player);
-    
+
     _initializePlayer();
     _setupPositionListener();
     _initSystemControls();
+  }
+
+  Future<void> _loadAutoRotatePreference() async {
+    final user = ref.read(currentUserProvider);
+    if (user != null) {
+      final prefs = await ref
+          .read(firestoreServiceProvider)
+          .getUserPreferences(user.uid)
+          .first;
+      if (mounted) {
+        setState(() {
+          _autoRotateEnabled = prefs['autoRotateEnabled'] as bool? ?? true;
+        });
+      }
+    }
+  }
+
+  void _setupOrientationListener() {
+    _orientationSubscription = NativeDeviceOrientationCommunicator()
+        .onOrientationChanged(useSensor: true)
+        .listen((orientation) {
+      if (!mounted || !_autoRotateEnabled) return;
+
+      List<DeviceOrientation> preferredOrientations;
+
+      switch (orientation) {
+        case NativeDeviceOrientation.landscapeLeft:
+          preferredOrientations = [DeviceOrientation.landscapeLeft];
+          break;
+        case NativeDeviceOrientation.landscapeRight:
+          preferredOrientations = [DeviceOrientation.landscapeRight];
+          break;
+        case NativeDeviceOrientation.portraitUp:
+          preferredOrientations = [DeviceOrientation.portraitUp];
+          break;
+        case NativeDeviceOrientation.portraitDown:
+          preferredOrientations = [DeviceOrientation.portraitDown];
+          break;
+        default:
+          return;
+      }
+
+      SystemChrome.setPreferredOrientations(preferredOrientations);
+    });
+  }
+
+  Future<void> _toggleAutoRotate() async {
+    setState(() {
+      _autoRotateEnabled = !_autoRotateEnabled;
+    });
+
+    final user = ref.read(currentUserProvider);
+    if (user != null) {
+      await ref.read(firestoreServiceProvider).updateUserPreferences(
+        user.uid,
+        {'autoRotateEnabled': _autoRotateEnabled},
+      );
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _autoRotateEnabled ? 'Auto-Rotate Enabled' : 'Auto-Rotate Disabled',
+            textAlign: TextAlign.center,
+          ),
+          duration: const Duration(milliseconds: 1000),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.black87,
+          width: 200,
+        ),
+      );
+    }
   }
 
   Future<void> _initSystemControls() async {
@@ -114,7 +191,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       _feedbackIcon = icon;
       _feedbackText = text;
     });
-    
+
     _feedbackTimer?.cancel();
     _feedbackTimer = Timer(const Duration(seconds: 1), () {
       if (mounted) {
@@ -132,7 +209,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     _volume = _volume.clamp(0.0, 1.0);
     VolumeController.instance.setVolume(_volume);
     _showGestureFeedback(
-      _volume > 0.5 ? Icons.volume_up : _volume > 0 ? Icons.volume_down : Icons.volume_off,
+      _volume > 0.5
+          ? Icons.volume_up
+          : _volume > 0
+              ? Icons.volume_down
+              : Icons.volume_off,
       '${(_volume * 100).toInt()}%',
     );
   }
@@ -155,15 +236,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     final current = player.state.position;
     final duration = player.state.duration;
     var newPos = current + delta;
-    
+
     if (newPos < Duration.zero) newPos = Duration.zero;
     if (newPos > duration) newPos = duration;
-    
+
     if (newPos > duration) newPos = duration;
-    
+
     _lastSeekTime = DateTime.now();
     await player.seek(newPos);
-    
+
     _showGestureFeedback(
       delta.isNegative ? Icons.replay_10 : Icons.forward_10,
       '${delta.isNegative ? "-" : "+"}${delta.inSeconds.abs()}s',
@@ -173,7 +254,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       // App is in background or closed
       if (player.state.playing) {
         player.pause();
@@ -192,21 +274,22 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       // Check if this is a Raiden source (episodeId starts with raiden_)
       if (widget.episodeId.startsWith('raiden_')) {
         debugPrint('🎬 Playing Raiden content: ${widget.episodeId}');
-        
+
         // Get the Raiden data from cache
-        final raidenData = ref.read(raidenAnimeDetailsProvider(widget.episodeId));
-        
+        final raidenData =
+            ref.read(raidenAnimeDetailsProvider(widget.episodeId));
+
         if (raidenData != null && raidenData['download_url'] != null) {
           final directUrl = raidenData['download_url'] as String;
           debugPrint('✅ Got Raiden direct URL: $directUrl');
-          
+
           // Play the direct MP4 URL
           await player.open(Media(directUrl));
-          
+
           setState(() {
             isInitialized = true;
           });
-          
+
           await player.play();
           return;
         } else {
@@ -218,16 +301,19 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
           return;
         }
       }
-      
+
       // Original AllAnime logic
-      debugPrint('🎬 Fetching video sources for: ${widget.episodeId} (type: $_translationType)');
-      
+      debugPrint(
+          '🎬 Fetching video sources for: ${widget.episodeId} (type: $_translationType)');
+
       final sources = await ref.read(episodeSourcesWithTypeProvider((
         episodeId: widget.episodeId,
         translationType: _translationType,
       )).future);
-      
-      if (sources == null || sources['sources'] == null || (sources['sources'] as List).isEmpty) {
+
+      if (sources == null ||
+          sources['sources'] == null ||
+          (sources['sources'] as List).isEmpty) {
         setState(() {
           hasError = true;
           errorMessage = 'No video sources available for $_translationType';
@@ -235,7 +321,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
         return;
       }
 
-      _availableSources = List<Map<String, dynamic>>.from(sources['sources'] as List);
+      _availableSources =
+          List<Map<String, dynamic>>.from(sources['sources'] as List);
       debugPrint('✅ Loaded ${_availableSources.length} sources');
 
       await _playCurrentSource();
@@ -260,8 +347,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
 
     try {
       final videoUrl = _availableSources[_currentSourceIndex]['url'];
-      debugPrint('🎥 Playing URL (source ${_currentSourceIndex + 1}/${_availableSources.length}): ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
-      
+      debugPrint(
+          '🎥 Playing URL (source ${_currentSourceIndex + 1}/${_availableSources.length}): ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
+
       setState(() {
         hasError = false;
         errorMessage = null;
@@ -289,10 +377,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       }
 
       await player.open(
-        Media(videoUrl,
+        Media(
+          videoUrl,
           httpHeaders: {
             'Referer': 'https://allanime.to',
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+            'User-Agent':
+                'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
             'Origin': 'https://allanime.to',
           },
         ),
@@ -300,8 +390,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       );
 
       final storage = ref.read(storageServiceProvider);
-      final savedHistory = storage.getEpisodeHistory(widget.animeId, widget.episodeId);
-      
+      final savedHistory =
+          storage.getEpisodeHistory(widget.animeId, widget.episodeId);
+
       if (savedHistory != null && savedHistory.position > Duration.zero) {
         await player.seek(savedHistory.position);
       }
@@ -310,15 +401,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
 
       // Sync history immediately when playback starts (without position)
       _saveWatchHistory(
-        savedHistory?.position ?? Duration.zero, 
-        player.state.duration, 
-        syncToCloud: true
-      );
+          savedHistory?.position ?? Duration.zero, player.state.duration,
+          syncToCloud: true);
 
       setState(() {
         isInitialized = true;
       });
-      
     } catch (e) {
       debugPrint('❌ Error playing source $_currentSourceIndex: $e');
       _playNextSource();
@@ -351,16 +439,16 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
           _hasPlayedSuccessfully = true;
           debugPrint('✅ Source marked as valid (played > 2s)');
         }
-        
+
         if (position.inSeconds % 5 == 0) {
           _saveWatchHistory(position, duration);
         }
       }
     });
-    
+
     player.stream.error.listen((error) {
       debugPrint('❌ Player error: $error');
-      
+
       // If we haven't played successfully yet, assume source is bad and switch
       if (!_hasPlayedSuccessfully) {
         debugPrint('⚠️ Source failed at start, switching...');
@@ -371,7 +459,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       // If we HAVE played successfully, this is likely a network/seek error.
       // Do NOT switch source automatically. Just notify user and try to resume.
       debugPrint('⚠️ Error during playback/seek. Retrying...');
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Buffering error. Waiting...'),
@@ -383,7 +471,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
           ),
         ),
       );
-      
+
       // Attempt to resume after a short delay
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted && !player.state.playing) {
@@ -394,11 +482,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
   }
 
   Future<void> _switchSource(int newIndex) async {
-    if (newIndex == _currentSourceIndex || newIndex >= _availableSources.length) return;
-    
+    if (newIndex == _currentSourceIndex || newIndex >= _availableSources.length)
+      return;
+
     debugPrint('🔄 Switching to source $newIndex');
     // final currentPosition = player.state.position; // Optional: preserve position
-    
+
     setState(() {
       _currentSourceIndex = newIndex;
     });
@@ -410,7 +499,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
     debugPrint('🔄 Toggling translation type');
     final currentPosition = player.state.position;
     final newType = _translationType == 'sub' ? 'dub' : 'sub';
-    
+
     setState(() {
       _translationType = newType;
       _currentSourceIndex = 0; // Reset to first source
@@ -419,14 +508,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
 
     // Reload sources and player
     await _initializePlayer();
-    
+
     // Seek to previous position if player initialized successfully
     if (isInitialized && currentPosition > Duration.zero) {
       await player.seek(currentPosition);
     }
   }
 
-  void _saveWatchHistory(Duration position, Duration duration, {bool syncToCloud = false}) {
+  void _saveWatchHistory(Duration position, Duration duration,
+      {bool syncToCloud = false}) {
     final history = WatchHistory(
       animeId: widget.animeId,
       animeTitle: widget.animeTitle,
@@ -437,21 +527,23 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       durationMs: duration.inMilliseconds,
       lastWatched: DateTime.now(),
     );
-    
-    ref.read(historyProvider.notifier).saveHistory(history, syncToCloud: syncToCloud);
+
+    ref
+        .read(historyProvider.notifier)
+        .saveHistory(history, syncToCloud: syncToCloud);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _feedbackTimer?.cancel(); // Cancel feedback timer
+    _feedbackTimer?.cancel();
+    _orientationSubscription?.cancel();
     final position = player.state.position;
     final duration = player.state.duration;
     if (duration.inSeconds > 0) {
       _saveWatchHistory(position, duration);
     }
-    
-    // Reset brightness
+
     try {
       ScreenBrightness().resetScreenBrightness();
     } catch (_) {}
@@ -462,14 +554,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    
+
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    player.stop(); // Force stop playback
+    player.stop();
     player.dispose();
     super.dispose();
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -505,10 +596,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
       canPop: false,
       onPopInvoked: (didPop) async {
         if (didPop) return;
-        
+
         // Force stop player before popping
         await player.stop();
-        
+
         if (context.mounted) {
           Navigator.of(context).pop();
         }
@@ -521,28 +612,30 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                   // 1. Video Player with Native Controls
                   MaterialVideoControlsTheme(
                     normal: MaterialVideoControlsThemeData(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 20),
+                      padding: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 20),
                       topButtonBar: [
                         // Sub/Dub Toggle
                         // Always show sub/dub button
-                          MaterialCustomButton(
-                            onPressed: _toggleTranslationType,
-                            icon: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.black45,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                _translationType.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                        MaterialCustomButton(
+                          onPressed: _toggleTranslationType,
+                          icon: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black45,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              _translationType.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ),
+                        ),
                         // Quality Selector
                         if (_availableSources.length > 1)
                           MaterialCustomButton(
@@ -557,10 +650,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                             icon: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.hd, color: Colors.white, size: 20),
+                                const Icon(Icons.hd,
+                                    color: Colors.white, size: 20),
                                 const SizedBox(width: 4),
                                 Text(
-                                  _availableSources[_currentSourceIndex]['quality'] as String,
+                                  _availableSources[_currentSourceIndex]
+                                      ['quality'] as String,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
@@ -576,19 +671,30 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                           onPressed: () {
                             setState(() {
                               switch (_fit) {
-                                case BoxFit.contain: _fit = BoxFit.cover; break;
-                                case BoxFit.cover: _fit = BoxFit.fill; break;
-                                case BoxFit.fill: _fit = BoxFit.fitWidth; break;
-                                default: _fit = BoxFit.contain;
+                                case BoxFit.contain:
+                                  _fit = BoxFit.cover;
+                                  break;
+                                case BoxFit.cover:
+                                  _fit = BoxFit.fill;
+                                  break;
+                                case BoxFit.fill:
+                                  _fit = BoxFit.fitWidth;
+                                  break;
+                                default:
+                                  _fit = BoxFit.contain;
                               }
                             });
                             ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
-                                  _fit == BoxFit.contain ? 'Fit to Screen' :
-                                  _fit == BoxFit.cover ? 'Zoom to Fill' :
-                                  _fit == BoxFit.fill ? 'Stretch to Fill' : 'Full Width',
+                                  _fit == BoxFit.contain
+                                      ? 'Fit to Screen'
+                                      : _fit == BoxFit.cover
+                                          ? 'Zoom to Fill'
+                                          : _fit == BoxFit.fill
+                                              ? 'Stretch to Fill'
+                                              : 'Full Width',
                                   textAlign: TextAlign.center,
                                 ),
                                 duration: const Duration(milliseconds: 1000),
@@ -599,9 +705,22 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                             );
                           },
                           icon: Icon(
-                            _fit == BoxFit.contain ? Icons.fullscreen_exit :
-                            _fit == BoxFit.cover ? Icons.zoom_out_map :
-                            _fit == BoxFit.fill ? Icons.aspect_ratio : Icons.fit_screen,
+                            _fit == BoxFit.contain
+                                ? Icons.fullscreen_exit
+                                : _fit == BoxFit.cover
+                                    ? Icons.zoom_out_map
+                                    : _fit == BoxFit.fill
+                                        ? Icons.aspect_ratio
+                                        : Icons.fit_screen,
+                            color: Colors.white,
+                          ),
+                        ),
+                        MaterialCustomButton(
+                          onPressed: _toggleAutoRotate,
+                          icon: Icon(
+                            _autoRotateEnabled
+                                ? Icons.screen_rotation
+                                : Icons.screen_lock_rotation,
                             color: Colors.white,
                           ),
                         ),
@@ -613,28 +732,30 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                       ],
                     ),
                     fullscreen: MaterialVideoControlsThemeData(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 20),
+                      padding: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 20),
                       topButtonBar: [
                         // Sub/Dub Toggle
                         // Always show sub/dub button
-                          MaterialCustomButton(
-                            onPressed: _toggleTranslationType,
-                            icon: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.black45,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                _translationType.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                        MaterialCustomButton(
+                          onPressed: _toggleTranslationType,
+                          icon: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black45,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              _translationType.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ),
+                        ),
                         // Quality Selector
                         if (_availableSources.length > 1)
                           MaterialCustomButton(
@@ -649,10 +770,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                             icon: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.hd, color: Colors.white, size: 20),
+                                const Icon(Icons.hd,
+                                    color: Colors.white, size: 20),
                                 const SizedBox(width: 4),
                                 Text(
-                                  _availableSources[_currentSourceIndex]['quality'] as String,
+                                  _availableSources[_currentSourceIndex]
+                                      ['quality'] as String,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
@@ -668,19 +791,30 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                           onPressed: () {
                             setState(() {
                               switch (_fit) {
-                                case BoxFit.contain: _fit = BoxFit.cover; break;
-                                case BoxFit.cover: _fit = BoxFit.fill; break;
-                                case BoxFit.fill: _fit = BoxFit.fitWidth; break;
-                                default: _fit = BoxFit.contain;
+                                case BoxFit.contain:
+                                  _fit = BoxFit.cover;
+                                  break;
+                                case BoxFit.cover:
+                                  _fit = BoxFit.fill;
+                                  break;
+                                case BoxFit.fill:
+                                  _fit = BoxFit.fitWidth;
+                                  break;
+                                default:
+                                  _fit = BoxFit.contain;
                               }
                             });
                             ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
-                                  _fit == BoxFit.contain ? 'Fit to Screen' :
-                                  _fit == BoxFit.cover ? 'Zoom to Fill' :
-                                  _fit == BoxFit.fill ? 'Stretch to Fill' : 'Full Width',
+                                  _fit == BoxFit.contain
+                                      ? 'Fit to Screen'
+                                      : _fit == BoxFit.cover
+                                          ? 'Zoom to Fill'
+                                          : _fit == BoxFit.fill
+                                              ? 'Stretch to Fill'
+                                              : 'Full Width',
                                   textAlign: TextAlign.center,
                                 ),
                                 duration: const Duration(milliseconds: 1000),
@@ -691,9 +825,22 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                             );
                           },
                           icon: Icon(
-                            _fit == BoxFit.contain ? Icons.fullscreen_exit :
-                            _fit == BoxFit.cover ? Icons.zoom_out_map :
-                            _fit == BoxFit.fill ? Icons.aspect_ratio : Icons.fit_screen,
+                            _fit == BoxFit.contain
+                                ? Icons.fullscreen_exit
+                                : _fit == BoxFit.cover
+                                    ? Icons.zoom_out_map
+                                    : _fit == BoxFit.fill
+                                        ? Icons.aspect_ratio
+                                        : Icons.fit_screen,
+                            color: Colors.white,
+                          ),
+                        ),
+                        MaterialCustomButton(
+                          onPressed: _toggleAutoRotate,
+                          icon: Icon(
+                            _autoRotateEnabled
+                                ? Icons.screen_rotation
+                                : Icons.screen_lock_rotation,
                             color: Colors.white,
                           ),
                         ),
@@ -728,19 +875,28 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                         });
                       },
                       onHorizontalDragUpdate: (details) {
-                        if (_seekStartPosition != null && _seekTargetPosition != null) {
-                          final dragDistance = details.globalPosition.dx - _seekStartPosition!;
-                          final seekAmount = (dragDistance / MediaQuery.of(context).size.width) * 90; // 90 seconds per full screen width
-                          
-                          final newPosition = _seekTargetPosition! + Duration(seconds: seekAmount.round());
+                        if (_seekStartPosition != null &&
+                            _seekTargetPosition != null) {
+                          final dragDistance =
+                              details.globalPosition.dx - _seekStartPosition!;
+                          final seekAmount = (dragDistance /
+                                  MediaQuery.of(context).size.width) *
+                              90; // 90 seconds per full screen width
+
+                          final newPosition = _seekTargetPosition! +
+                              Duration(seconds: seekAmount.round());
                           final duration = player.state.duration;
-                          
+
                           setState(() {
                             _seekTargetPosition = Duration(
-                              milliseconds: newPosition.inMilliseconds.clamp(0, duration.inMilliseconds),
+                              milliseconds: newPosition.inMilliseconds
+                                  .clamp(0, duration.inMilliseconds),
                             );
-                            _feedbackIcon = seekAmount > 0 ? Icons.fast_forward : Icons.fast_rewind;
-                            _feedbackText = '${_seekTargetPosition!.inMinutes}:${(_seekTargetPosition!.inSeconds % 60).toString().padLeft(2, '0')}';
+                            _feedbackIcon = seekAmount > 0
+                                ? Icons.fast_forward
+                                : Icons.fast_rewind;
+                            _feedbackText =
+                                '${_seekTargetPosition!.inMinutes}:${(_seekTargetPosition!.inSeconds % 60).toString().padLeft(2, '0')}';
                           });
                         }
                       },
@@ -754,10 +910,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                           _seekStartPosition = null;
                           _seekTargetPosition = null;
                         });
-                        
+
                         // Hide feedback after a short delay
                         _feedbackTimer?.cancel();
-                        _feedbackTimer = Timer(const Duration(milliseconds: 500), () {
+                        _feedbackTimer =
+                            Timer(const Duration(milliseconds: 500), () {
                           if (mounted) {
                             setState(() {
                               _feedbackIcon = null;
@@ -776,7 +933,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                         final width = MediaQuery.of(context).size.width;
                         final dx = details.globalPosition.dx;
                         final delta = -details.delta.dy / 200;
-                        
+
                         if (dx > width / 2) {
                           _handleVolumeDrag(delta);
                         } else {
@@ -785,9 +942,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                       },
                       onVerticalDragEnd: (details) {
                         _isDragging = false;
-                        
+
                         _feedbackTimer?.cancel();
-                        _feedbackTimer = Timer(const Duration(milliseconds: 500), () {
+                        _feedbackTimer =
+                            Timer(const Duration(milliseconds: 500), () {
                           if (mounted) {
                             setState(() {
                               _feedbackIcon = null;
@@ -809,7 +967,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                   ),
 
                   // Feedback overlay for seek
-                  if (_isSeeking && _feedbackIcon != null && _feedbackText != null)
+                  if (_isSeeking &&
+                      _feedbackIcon != null &&
+                      _feedbackText != null)
                     Center(
                       child: Container(
                         padding: const EdgeInsets.all(24),
@@ -824,14 +984,20 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                             const SizedBox(height: 8),
                             Text(
                               _feedbackText ?? '',
-                              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
                       ),
                     ),
                   // Transient feedback overlay (for volume/brightness)
-                  if (!_isSeeking && _feedbackIcon != null && _feedbackText != null)                  Center(
+                  if (!_isSeeking &&
+                      _feedbackIcon != null &&
+                      _feedbackText != null)
+                    Center(
                       child: Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -845,7 +1011,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                             const SizedBox(height: 8),
                             Text(
                               _feedbackText ?? '',
-                              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -862,7 +1031,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> with Widg
                       const SizedBox(height: 16),
                       Text(
                         errorMessage!,
-                        style: const TextStyle(color: Colors.white70, fontSize: 16),
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 16),
                         textAlign: TextAlign.center,
                       ),
                     ],

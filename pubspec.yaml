@@ -42,6 +42,7 @@ dependencies:
   volume_controller: ^3.4.0
   screen_brightness: ^2.1.7
   flutter_widget_from_html: ^0.17.1
+  native_device_orientation: ^2.1.0
 
 dev_dependencies:
   flutter_test:
