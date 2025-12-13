@@ -25,52 +25,80 @@ final searchResultsProvider = FutureProvider<List<Anime>>((ref) async {
   final localSettings = ref.watch(localSettingsProvider);
   final firebasePrefs = ref.watch(userPreferencesProvider).valueOrNull;
 
-  final allowAdult = (localSettings['allowAdult'] as bool?) ??
-      (firebasePrefs?['allowAdult'] as bool?) ??
+  final allowAdult = (firebasePrefs?['allowAdult'] as bool?) ??
+      (localSettings['allowAdult'] as bool?) ??
       false;
 
-  debugPrint('Search query: $query');
-  debugPrint('Local settings allowAdult: ${localSettings['allowAdult']}');
-  debugPrint('Firebase prefs allowAdult: ${firebasePrefs?['allowAdult']}');
+  final forceRaidenSearch = query.toLowerCase().contains('#raiden');
+  final cleanQuery =
+      query.replaceAll(RegExp(r'#raiden', caseSensitive: false), '').trim();
+
+  debugPrint('Search query: $cleanQuery (force Raiden: $forceRaidenSearch)');
+  debugPrint('Firebase prefs: ${firebasePrefs?['allowAdult']}');
+  debugPrint('Local settings: ${localSettings['allowAdult']}');
   debugPrint('Final allowAdult: $allowAdult');
 
-  // Always search AllAnime first
-  final allAnimeResults =
-      await apiService.searchAnime(query, allowAdult: allowAdult);
-
-  // If adult mode is ON, also search Raiden API and combine results
-  if (allowAdult) {
-    debugPrint('🔍 Adult mode ON - searching Raiden API too');
+  if (forceRaidenSearch && allowAdult) {
+    debugPrint('Force Raiden search requested');
     try {
-      final raidenResults = await raidenService.searchAdultAnime(query);
+      final raidenResults = await raidenService.searchAdultAnime(cleanQuery);
 
-      // Cache Raiden data for video playback
-      final raidenDataCache = ref.read(raidenAnimeDataProvider.notifier);
-      final currentCache = ref.read(raidenAnimeDataProvider);
-      final updatedCache = Map<String, Map<String, dynamic>>.from(currentCache);
+      if (raidenResults.isNotEmpty) {
+        final raidenDataCache = ref.read(raidenAnimeDataProvider.notifier);
+        final currentCache = ref.read(raidenAnimeDataProvider);
+        final updatedCache =
+            Map<String, Map<String, dynamic>>.from(currentCache);
 
-      for (var raidenData in raidenResults) {
-        final anime = RaidenDataConverter.fromRaidenResult(raidenData);
-        updatedCache[anime.id] =
-            raidenData; // Store original data with download_url
+        for (var raidenData in raidenResults) {
+          final anime = RaidenDataConverter.fromRaidenResult(raidenData);
+          updatedCache[anime.id] = raidenData;
+        }
+
+        raidenDataCache.state = updatedCache;
+        final raidenAnime =
+            RaidenDataConverter.fromRaidenResultsList(raidenResults);
+
+        debugPrint('Raiden returned ${raidenAnime.length} results');
+        return raidenAnime;
       }
-
-      raidenDataCache.state = updatedCache;
-
-      final raidenAnime =
-          RaidenDataConverter.fromRaidenResultsList(raidenResults);
-
-      // Combine results: AllAnime first, then Raiden
-      debugPrint(
-          'Combined ${allAnimeResults.length} AllAnime + ${raidenAnime.length} Raiden results');
-      return [...allAnimeResults, ...raidenAnime];
     } catch (e) {
       debugPrint('Raiden API failed: $e');
-      // Raiden API failed, just return AllAnime results
-      return allAnimeResults;
     }
-  } else {
-    debugPrint('Adult mode OFF - only AllAnime results');
+    return [];
+  }
+
+  // Search AllAnime first
+  final allAnimeResults =
+      await apiService.searchAnime(cleanQuery, allowAdult: allowAdult);
+  debugPrint('AllAnime returned ${allAnimeResults.length} results');
+
+  // If adult mode is ON and AllAnime returned no results, try Raiden as fallback
+  if (allowAdult && allAnimeResults.isEmpty) {
+    debugPrint('No AllAnime results - trying Raiden API as fallback');
+    try {
+      final raidenResults = await raidenService.searchAdultAnime(cleanQuery);
+
+      if (raidenResults.isNotEmpty) {
+        final raidenDataCache = ref.read(raidenAnimeDataProvider.notifier);
+        final currentCache = ref.read(raidenAnimeDataProvider);
+        final updatedCache =
+            Map<String, Map<String, dynamic>>.from(currentCache);
+
+        for (var raidenData in raidenResults) {
+          final anime = RaidenDataConverter.fromRaidenResult(raidenData);
+          updatedCache[anime.id] = raidenData;
+        }
+
+        raidenDataCache.state = updatedCache;
+        final raidenAnime =
+            RaidenDataConverter.fromRaidenResultsList(raidenResults);
+
+        debugPrint('Raiden returned ${raidenAnime.length} results');
+        return raidenAnime;
+      }
+    } catch (e) {
+      debugPrint('Raiden API failed: $e');
+    }
   }
 
   return allAnimeResults;
@@ -109,8 +137,8 @@ final latestReleasesProvider = FutureProvider.family<List<Map<String, dynamic>>,
   final localSettings = ref.watch(localSettingsProvider);
   final firebasePrefs = ref.watch(userPreferencesProvider).valueOrNull;
 
-  final allowAdult = (localSettings['allowAdult'] as bool?) ??
-      (firebasePrefs?['allowAdult'] as bool?) ??
+  final allowAdult = (firebasePrefs?['allowAdult'] as bool?) ??
+      (localSettings['allowAdult'] as bool?) ??
       false;
 
   debugPrint(

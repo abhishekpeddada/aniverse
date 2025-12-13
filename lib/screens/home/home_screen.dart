@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../search/search_screen.dart';
 import '../lists/watchlist_screen.dart';
@@ -154,11 +156,13 @@ class HomePage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('AniVerse'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () => _showSettingsDialog(context, ref),
-            tooltip: 'Settings',
-          ),
+          if (!kIsWeb &&
+              (Platform.isLinux || Platform.isWindows || Platform.isMacOS))
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () => _showSettingsDialog(context, ref),
+              tooltip: 'Settings',
+            ),
           IconButton(
             icon: const Icon(Icons.person),
             onPressed: () {
