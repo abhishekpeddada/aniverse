@@ -88,6 +88,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   // Playback speed
   double _playbackSpeed = 1.0;
 
+  Timer? _historySaveTimer;
+
   void _resetHideTimer() {
     _hideControlsTimer?.cancel();
     setState(() {
@@ -203,7 +205,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    player = Player();
+    player = Player(
+      configuration: const PlayerConfiguration(
+        title: 'AniVerse Player',
+      ),
+    );
     controller = VideoController(player);
 
     _initializePlayer();
@@ -212,6 +218,14 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
     // Start auto-hide timer for controls
     _resetHideTimer();
+
+    _historySaveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      final position = player.state.position;
+      final duration = player.state.duration;
+      if (duration.inSeconds > 0 && position.inSeconds > 0) {
+        _saveWatchHistory(position, duration);
+      }
+    });
   }
 
   Future<void> _loadAutoRotatePreference() async {
@@ -230,32 +244,40 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   }
 
   void _setupOrientationListener() {
-    _orientationSubscription = NativeDeviceOrientationCommunicator()
-        .onOrientationChanged(useSensor: true)
-        .listen((orientation) {
-      if (!mounted || !_autoRotateEnabled) return;
+    if (kIsWeb || Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      return;
+    }
 
-      List<DeviceOrientation> preferredOrientations;
+    try {
+      _orientationSubscription = NativeDeviceOrientationCommunicator()
+          .onOrientationChanged(useSensor: true)
+          .listen((orientation) {
+        if (!mounted || !_autoRotateEnabled) return;
 
-      switch (orientation) {
-        case NativeDeviceOrientation.landscapeLeft:
-          preferredOrientations = [DeviceOrientation.landscapeLeft];
-          break;
-        case NativeDeviceOrientation.landscapeRight:
-          preferredOrientations = [DeviceOrientation.landscapeRight];
-          break;
-        case NativeDeviceOrientation.portraitUp:
-          preferredOrientations = [DeviceOrientation.portraitUp];
-          break;
-        case NativeDeviceOrientation.portraitDown:
-          preferredOrientations = [DeviceOrientation.portraitDown];
-          break;
-        default:
-          return;
-      }
+        List<DeviceOrientation> preferredOrientations;
 
-      SystemChrome.setPreferredOrientations(preferredOrientations);
-    });
+        switch (orientation) {
+          case NativeDeviceOrientation.landscapeLeft:
+            preferredOrientations = [DeviceOrientation.landscapeLeft];
+            break;
+          case NativeDeviceOrientation.landscapeRight:
+            preferredOrientations = [DeviceOrientation.landscapeRight];
+            break;
+          case NativeDeviceOrientation.portraitUp:
+            preferredOrientations = [DeviceOrientation.portraitUp];
+            break;
+          case NativeDeviceOrientation.portraitDown:
+            preferredOrientations = [DeviceOrientation.portraitDown];
+            break;
+          default:
+            return;
+        }
+
+        SystemChrome.setPreferredOrientations(preferredOrientations);
+      });
+    } catch (e) {
+      debugPrint('Orientation listener not available: $e');
+    }
   }
 
   Future<void> _toggleAutoRotate() async {
@@ -289,11 +311,19 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   }
 
   Future<void> _initSystemControls() async {
+    if (kIsWeb || Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      _volume = 0.5;
+      _brightness = 0.5;
+      return;
+    }
+
     try {
       _volume = await VolumeController.instance.getVolume();
       _brightness = await ScreenBrightness().current;
     } catch (e) {
-      debugPrint('Error initializing system controls: $e');
+      debugPrint('System controls not available: $e');
+      _volume = 0.5;
+      _brightness = 0.5;
     }
   }
 
@@ -331,6 +361,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   }
 
   Future<void> _handleBrightnessDrag(double delta) async {
+    if (kIsWeb || Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      return;
+    }
+
     _brightness += delta;
     _brightness = _brightness.clamp(0.0, 1.0);
     try {
@@ -386,6 +420,33 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       if (widget.isOffline && widget.offlineFilePath != null) {
         debugPrint('🎬 Playing offline: ${widget.offlineFilePath}');
 
+        if (!kIsWeb && Platform.isLinux) {
+          debugPrint('🐧 Launching MPV for offline video on Linux');
+
+          try {
+            final mpvProcess = await Process.start('mpv', [
+              '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+              '--force-window=yes',
+              '--keep-open=yes',
+              widget.offlineFilePath!,
+            ]);
+
+            mpvProcess.exitCode.then((code) {
+              debugPrint('MPV exited with code: $code');
+            });
+
+            await Future.delayed(const Duration(milliseconds: 500));
+            _hasPlayedSuccessfully = true;
+
+            if (mounted) {
+              Navigator.of(context).pop();
+            }
+            return;
+          } catch (e) {
+            debugPrint('Failed to launch MPV: $e');
+          }
+        }
+
         await player.open(Media(widget.offlineFilePath!));
 
         setState(() {
@@ -408,7 +469,33 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           final directUrl = raidenData['download_url'] as String;
           debugPrint('✅ Got Raiden direct URL: $directUrl');
 
-          // Play the direct MP4 URL
+          if (!kIsWeb && Platform.isLinux) {
+            debugPrint('🐧 Launching MPV for Raiden video on Linux');
+
+            try {
+              final mpvProcess = await Process.start('mpv', [
+                '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+                '--force-window=yes',
+                '--keep-open=yes',
+                directUrl,
+              ]);
+
+              mpvProcess.exitCode.then((code) {
+                debugPrint('MPV exited with code: $code');
+              });
+
+              await Future.delayed(const Duration(milliseconds: 500));
+              _hasPlayedSuccessfully = true;
+
+              if (mounted) {
+                Navigator.of(context).pop();
+              }
+              return;
+            } catch (e) {
+              debugPrint('Failed to launch MPV: $e');
+            }
+          }
+
           await player.open(Media(directUrl));
 
           setState(() {
@@ -482,23 +569,38 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         _hasPlayedSuccessfully = false; // Reset success flag for new source
       });
 
-      if (defaultTargetPlatform == TargetPlatform.linux) {
-        // ... Linux specific code (omitted for brevity, assuming it handles its own errors or we wrap it)
-        // For now, keeping existing Linux logic but wrapping in try-catch
-        debugPrint('🐧 Launching mpv on Linux');
-        await player.stop(); // Ensure internal player is stopped
-        final mpvProcess = await Process.start('mpv', [
-          '--http-header-fields=Referer: https://allanime.to',
-          '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-          '--title=Anime Watcher - ${widget.animeTitle} Episode ${widget.episodeNumber}',
-          videoUrl,
-        ]);
-        mpvProcess.exitCode.then((code) {
-          if (code != 0) _playNextSource();
-        });
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) Navigator.of(context).pop();
-        return;
+      if (!kIsWeb && Platform.isLinux) {
+        debugPrint(
+            '🐧 Launching MPV on Linux (media_kit has rendering issues)');
+
+        try {
+          final mpvProcess = await Process.start('mpv', [
+            '--http-header-fields=Referer: https://allanime.to',
+            '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+            '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+            '--force-window=yes',
+            '--keep-open=yes',
+            videoUrl,
+          ]);
+
+          mpvProcess.exitCode.then((code) {
+            debugPrint('MPV exited with code: $code');
+            if (code != 0 && mounted) {
+              _playNextSource();
+            }
+          });
+
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          _hasPlayedSuccessfully = true;
+
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+          return;
+        } catch (e) {
+          debugPrint('Failed to launch MPV: $e');
+        }
       }
 
       await player.open(
@@ -640,32 +742,44 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     }
   }
 
-  void _saveWatchHistory(Duration position, Duration duration,
-      {bool syncToCloud = false}) {
+  Future<void> _saveWatchHistory(
+    Duration position,
+    Duration duration, {
+    bool syncToCloud = false,
+  }) async {
+    if (!mounted) return;
+
     final history = WatchHistory(
       animeId: widget.animeId,
+      episodeId: widget.episodeId,
       animeTitle: widget.animeTitle,
       animeImage: widget.animeImage,
       episodeNumber: widget.episodeNumber,
-      episodeId: widget.episodeId,
       positionMs: position.inMilliseconds,
       durationMs: duration.inMilliseconds,
       lastWatched: DateTime.now(),
     );
 
-    ref
-        .read(historyProvider.notifier)
-        .saveHistory(history, syncToCloud: syncToCloud);
+    try {
+      await ref
+          .read(historyProvider.notifier)
+          .saveHistory(history, syncToCloud: syncToCloud);
+    } catch (e) {
+      debugPrint('Failed to save watch history: $e');
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _feedbackTimer?.cancel();
+    _hideControlsTimer?.cancel();
+    _historySaveTimer?.cancel();
     _orientationSubscription?.cancel();
+
     final position = player.state.position;
     final duration = player.state.duration;
-    if (duration.inSeconds > 0) {
+    if (duration.inSeconds > 0 && mounted) {
       _saveWatchHistory(position, duration);
     }
 
@@ -741,6 +855,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                       controls: NoVideoControls,
                       fit: _fit,
                       fill: Colors.black,
+                      wakelock: true,
+                      filterQuality: FilterQuality.medium,
                     ),
                   ),
 

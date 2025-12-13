@@ -1,31 +1,63 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'dart:io' show Platform;
 
 class AuthService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  FirebaseAuth? _auth;
+  bool _isFirebaseAvailable = false;
 
-  User? get currentUser => _auth.currentUser;
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  AuthService() {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        _auth = FirebaseAuth.instance;
+        _isFirebaseAvailable = true;
+      } catch (e) {
+        debugPrint('Firebase Auth not available: $e');
+        _isFirebaseAvailable = false;
+      }
+    } else {
+      debugPrint('Firebase Auth disabled on desktop platform');
+      _isFirebaseAvailable = false;
+    }
+  }
+
+  Stream<User?> get authStateChanges {
+    if (!_isFirebaseAvailable || _auth == null) {
+      return Stream.value(null);
+    }
+    return _auth!.authStateChanges();
+  }
+
+  User? get currentUser {
+    if (!_isFirebaseAvailable || _auth == null) return null;
+    return _auth!.currentUser;
+  }
 
   Future<UserCredential?> signInWithGoogle() async {
+    if (!_isFirebaseAvailable || _auth == null) {
+      debugPrint('Google Sign-In not available on desktop');
+      return null;
+    }
+
     try {
       if (kIsWeb) {
         final GoogleAuthProvider googleProvider = GoogleAuthProvider();
-        return await _auth.signInWithPopup(googleProvider);
+        return await _auth!.signInWithPopup(googleProvider);
       } else {
-        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        final GoogleSignIn googleSignIn = GoogleSignIn();
+        final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
         if (googleUser == null) return null;
 
-        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        final GoogleSignInAuthentication googleAuth =
+            await googleUser.authentication;
 
         final credential = GoogleAuthProvider.credential(
           accessToken: googleAuth.accessToken,
           idToken: googleAuth.idToken,
         );
 
-        return await _auth.signInWithCredential(credential);
+        return await _auth!.signInWithCredential(credential);
       }
     } catch (e) {
       debugPrint('❌ Sign in error: $e');
@@ -34,11 +66,14 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    if (!_isFirebaseAvailable || _auth == null) return;
+
     try {
       if (!kIsWeb) {
-        await _googleSignIn.signOut();
+        final GoogleSignIn googleSignIn = GoogleSignIn();
+        await googleSignIn.signOut();
       }
-      await _auth.signOut();
+      await _auth!.signOut();
     } catch (e) {
       debugPrint('❌ Sign out error: $e');
       rethrow;

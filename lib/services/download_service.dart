@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../models/download_model.dart';
 import 'download_storage_service.dart';
@@ -67,20 +68,24 @@ class DownloadService {
   Future<void> _startForegroundService() async {
     if (_isForegroundServiceRunning) return;
 
-    final hasPermission =
-        await FlutterForegroundTask.checkNotificationPermission();
-    if (hasPermission != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
+    try {
+      final hasPermission =
+          await FlutterForegroundTask.checkNotificationPermission();
+      if (hasPermission != NotificationPermission.granted) {
+        await FlutterForegroundTask.requestNotificationPermission();
+      }
+
+      await FlutterForegroundTask.startService(
+        serviceId: 256,
+        notificationTitle: 'Downloading episodes',
+        notificationText: 'Downloads in progress',
+        callback: null,
+      );
+
+      _isForegroundServiceRunning = true;
+    } catch (e) {
+      debugPrint('Foreground service not available (desktop): $e');
     }
-
-    await FlutterForegroundTask.startService(
-      serviceId: 256,
-      notificationTitle: 'Downloading episodes',
-      notificationText: 'Downloads in progress',
-      callback: null,
-    );
-
-    _isForegroundServiceRunning = true;
   }
 
   Future<void> _stopForegroundService() async {

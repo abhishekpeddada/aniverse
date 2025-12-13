@@ -1,22 +1,47 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'dart:io' show Platform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/anime_model.dart';
 import '../models/watch_history_model.dart';
 
-final firestoreServiceProvider = Provider<FirestoreService>((ref) => FirestoreService());
+final firestoreServiceProvider =
+    Provider<FirestoreService>((ref) => FirestoreService());
 
 class FirestoreService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  FirebaseFirestore? _firestore;
+  bool _isFirebaseAvailable = false;
 
-  CollectionReference _getUserCollection(String userId, String collection) {
-    return _firestore.collection('users').doc(userId).collection(collection);
+  FirestoreService() {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        _firestore = FirebaseFirestore.instance;
+        _isFirebaseAvailable = true;
+      } catch (e) {
+        debugPrint('Firebase not available: $e');
+        _isFirebaseAvailable = false;
+      }
+    } else {
+      debugPrint('Firebase disabled on desktop platform');
+      _isFirebaseAvailable = false;
+    }
+  }
+
+  CollectionReference? _getUserCollection(String userId, String collection) {
+    if (!_isFirebaseAvailable || _firestore == null) return null;
+    return _firestore!.collection('users').doc(userId).collection(collection);
   }
 
   // User Preferences
-  Future<void> updateUserPreferences(String userId, Map<String, dynamic> prefs) async {
+  Future<void> updateUserPreferences(
+      String userId, Map<String, dynamic> prefs) async {
+    if (!_isFirebaseAvailable || _firestore == null) {
+      debugPrint('ℹ️ Skipping Firebase sync (desktop mode)');
+      return;
+    }
+
     try {
-      await _firestore.collection('users').doc(userId).set({
+      await _firestore!.collection('users').doc(userId).set({
         'preferences': prefs,
       }, SetOptions(merge: true));
     } catch (e) {
@@ -25,7 +50,15 @@ class FirestoreService {
   }
 
   Stream<Map<String, dynamic>> getUserPreferences(String userId) {
-    return _firestore.collection('users').doc(userId).snapshots().map((snapshot) {
+    if (!_isFirebaseAvailable || _firestore == null) {
+      return Stream.value({});
+    }
+
+    return _firestore!
+        .collection('users')
+        .doc(userId)
+        .snapshots()
+        .map((snapshot) {
       if (snapshot.exists && snapshot.data() != null) {
         final data = snapshot.data() as Map<String, dynamic>;
         return data['preferences'] as Map<String, dynamic>? ?? {};
@@ -36,9 +69,15 @@ class FirestoreService {
 
   // Watch History
   Future<void> syncWatchHistory(String userId, WatchHistory history) async {
+    if (!_isFirebaseAvailable || _firestore == null) return;
+
     try {
-      await _getUserCollection(userId, 'watchHistory')
-          .doc(history.animeId) // Use animeId as key to keep only latest episode
+      final collection = _getUserCollection(userId, 'watchHistory');
+      if (collection == null) return;
+
+      await collection
+          .doc(
+              history.animeId) // Use animeId as key to keep only latest episode
           .set({
         'animeId': history.animeId,
         'animeTitle': history.animeTitle,
@@ -48,22 +87,32 @@ class FirestoreService {
         // 'positionMs': history.positionMs
         'durationMs': history.durationMs,
         'lastWatched': history.lastWatched.toIso8601String(),
-      }, SetOptions(merge: true));
+      });
     } catch (e) {
       debugPrint('❌ Failed to sync watch history: $e');
     }
   }
-  
+
   Future<void> deleteWatchHistory(String userId, String animeId) async {
+    if (!_isFirebaseAvailable || _firestore == null) return;
     try {
-      await _getUserCollection(userId, 'watchHistory').doc(animeId).delete();
+      final collection = _getUserCollection(userId, 'watchHistory');
+      if (collection == null) return;
+      await collection.doc(animeId).delete();
     } catch (e) {
       debugPrint('❌ Failed to delete watch history: $e');
     }
   }
 
   Stream<List<WatchHistory>> getWatchHistory(String userId) {
-    return _getUserCollection(userId, 'watchHistory')
+    if (!_isFirebaseAvailable || _firestore == null) {
+      return Stream.value([]);
+    }
+
+    final collection = _getUserCollection(userId, 'watchHistory');
+    if (collection == null) return Stream.value([]);
+
+    return collection
         .orderBy('lastWatched', descending: true)
         .snapshots()
         .map((snapshot) {
@@ -85,8 +134,11 @@ class FirestoreService {
 
   // Watchlist
   Future<void> addToWatchlist(String userId, Anime anime) async {
+    if (!_isFirebaseAvailable || _firestore == null) return;
     try {
-      await _getUserCollection(userId, 'watchlist').doc(anime.id).set({
+      final collection = _getUserCollection(userId, 'watchlist');
+      if (collection == null) return;
+      await collection.doc(anime.id).set({
         'id': anime.id,
         'title': anime.title,
         'image': anime.image,
@@ -101,15 +153,23 @@ class FirestoreService {
   }
 
   Future<void> removeFromWatchlist(String userId, String animeId) async {
+    if (!_isFirebaseAvailable || _firestore == null) return;
     try {
-      await _getUserCollection(userId, 'watchlist').doc(animeId).delete();
+      final collection = _getUserCollection(userId, 'watchlist');
+      if (collection == null) return;
+      await collection.doc(animeId).delete();
     } catch (e) {
       debugPrint('❌ Failed to remove from watchlist: $e');
     }
   }
 
   Stream<List<Anime>> getWatchlist(String userId) {
-    return _getUserCollection(userId, 'watchlist')
+    if (!_isFirebaseAvailable || _firestore == null) {
+      return Stream.value([]);
+    }
+    final collection = _getUserCollection(userId, 'watchlist');
+    if (collection == null) return Stream.value([]);
+    return collection
         .orderBy('addedAt', descending: true)
         .snapshots()
         .map((snapshot) {
@@ -129,8 +189,11 @@ class FirestoreService {
 
   // Favorites
   Future<void> addToFavorites(String userId, Anime anime) async {
+    if (!_isFirebaseAvailable || _firestore == null) return;
     try {
-      await _getUserCollection(userId, 'favorites').doc(anime.id).set({
+      final collection = _getUserCollection(userId, 'favorites');
+      if (collection == null) return;
+      await collection.doc(anime.id).set({
         'id': anime.id,
         'title': anime.title,
         'image': anime.image,
@@ -145,15 +208,23 @@ class FirestoreService {
   }
 
   Future<void> removeFromFavorites(String userId, String animeId) async {
+    if (!_isFirebaseAvailable || _firestore == null) return;
     try {
-      await _getUserCollection(userId, 'favorites').doc(animeId).delete();
+      final collection = _getUserCollection(userId, 'favorites');
+      if (collection == null) return;
+      await collection.doc(animeId).delete();
     } catch (e) {
       debugPrint('❌ Failed to remove from favorites: $e');
     }
   }
 
   Stream<List<Anime>> getFavorites(String userId) {
-    return _getUserCollection(userId, 'favorites')
+    if (!_isFirebaseAvailable || _firestore == null) {
+      return Stream.value([]);
+    }
+    final collection = _getUserCollection(userId, 'favorites');
+    if (collection == null) return Stream.value([]);
+    return collection
         .orderBy('addedAt', descending: true)
         .snapshots()
         .map((snapshot) {
@@ -172,19 +243,27 @@ class FirestoreService {
   }
 
   Future<bool> isFavorite(String userId, String animeId) async {
+    if (!_isFirebaseAvailable || _firestore == null) return false;
     try {
-      final doc = await _getUserCollection(userId, 'favorites').doc(animeId).get();
+      final collection = _getUserCollection(userId, 'favorites');
+      if (collection == null) return false;
+      final doc = await collection.doc(animeId).get();
       return doc.exists;
     } catch (e) {
+      debugPrint('Failed to check favorite status: $e');
       return false;
     }
   }
 
   Future<bool> isInWatchlist(String userId, String animeId) async {
+    if (!_isFirebaseAvailable || _firestore == null) return false;
     try {
-      final doc = await _getUserCollection(userId, 'watchlist').doc(animeId).get();
+      final collection = _getUserCollection(userId, 'watchlist');
+      if (collection == null) return false;
+      final doc = await collection.doc(animeId).get();
       return doc.exists;
     } catch (e) {
+      debugPrint('Failed to check watchlist status: $e');
       return false;
     }
   }

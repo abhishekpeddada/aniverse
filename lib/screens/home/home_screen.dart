@@ -9,6 +9,7 @@ import 'widgets/continue_watching_section.dart';
 import '../profile/profile_screen.dart';
 import '../auth/login_screen.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/local_settings_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -80,25 +81,97 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
+  void _showSettingsDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          final settings = ref.watch(localSettingsProvider);
+          final allowAdult = settings['allowAdult'] as bool? ?? false;
+
+          return AlertDialog(
+            title: const Text('Settings'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  title: const Text('Adult Content'),
+                  subtitle: const Text('Show adult content in search results'),
+                  value: allowAdult,
+                  onChanged: (value) async {
+                    if (value) {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Enable Adult Content?'),
+                          content: const Text(
+                            'This will show adult content in search results and latest releases.\n\nYou can disable this at any time.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Enable'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirmed == true) {
+                        await ref
+                            .read(localSettingsProvider.notifier)
+                            .updateSetting('allowAdult', true);
+                      }
+                    } else {
+                      await ref
+                          .read(localSettingsProvider.notifier)
+                          .updateSetting('allowAdult', false);
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Anime Watcher'),
+        title: const Text('AniVerse'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.account_circle),
+            icon: const Icon(Icons.settings),
+            onPressed: () => _showSettingsDialog(context, ref),
+            tooltip: 'Settings',
+          ),
+          IconButton(
+            icon: const Icon(Icons.person),
             onPressed: () {
-              final user = ref.read(currentUserProvider);
-              if (user != null) {
+              if (user == null) {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
                 );
               } else {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  MaterialPageRoute(
+                      builder: (context) => const ProfileScreen()),
                 );
               }
             },
@@ -107,7 +180,6 @@ class HomePage extends ConsumerWidget {
       ),
       body: const SingleChildScrollView(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ContinueWatchingSection(),
             SizedBox(height: 24),
