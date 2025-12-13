@@ -31,7 +31,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
   @override
   Widget build(BuildContext context) {
     final downloadsAsync = ref.watch(downloadsProvider);
-    final storageUsageAsync = ref.watch(storageUsageProvider);
+    final storageAsync = ref.watch(storageUsageStreamProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -53,7 +53,8 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
       ),
       body: Column(
         children: [
-          if (storageUsageAsync.hasValue && storageUsageAsync.value! > 0)
+          // Real-time storage updates
+          if (storageAsync.hasValue && storageAsync.value! > 0)
             Container(
               padding: const EdgeInsets.all(16),
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -62,7 +63,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
                   const Icon(Icons.storage, size: 20),
                   const SizedBox(width: 8),
                   Text(
-                    'Storage Used: ${_formatBytes(storageUsageAsync.value!)}',
+                    'Storage Used: ${_formatBytes(storageAsync.value!)}',
                     style: const TextStyle(fontSize: 14),
                   ),
                 ],
@@ -133,9 +134,59 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
       );
     }
 
+    // Group downloads by anime title
+    final Map<String, List<Download>> groupedDownloads = {};
+    for (var download in completed) {
+      final key = download.animeTitle;
+      if (!groupedDownloads.containsKey(key)) {
+        groupedDownloads[key] = [];
+      }
+      groupedDownloads[key]!.add(download);
+    }
+
+    // Sort episodes within each anime by episode number
+    groupedDownloads.forEach((key, value) {
+      value.sort((a, b) => a.episodeNumber.compareTo(b.episodeNumber));
+    });
+
     return ListView.builder(
-      itemCount: completed.length,
-      itemBuilder: (context, index) => _buildDownloadCard(completed[index]),
+      itemCount: groupedDownloads.length,
+      itemBuilder: (context, index) {
+        final animeTitle = groupedDownloads.keys.elementAt(index);
+        final animeDownloads = groupedDownloads[animeTitle]!;
+
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ExpansionTile(
+            leading: animeDownloads.first.animeImage != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: CachedNetworkImage(
+                      imageUrl: animeDownloads.first.animeImage!,
+                      width: 50,
+                      height: 70,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : Container(
+                    width: 50,
+                    height: 70,
+                    color: Colors.grey[800],
+                    child: const Icon(Icons.movie),
+                  ),
+            title: Text(
+              animeTitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+                '${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''}'),
+            children: animeDownloads.map((download) {
+              return _buildDownloadCard(download, isGrouped: true);
+            }).toList(),
+          ),
+        );
+      },
     );
   }
 
@@ -162,12 +213,14 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
     );
   }
 
-  Widget _buildDownloadCard(Download download) {
+  Widget _buildDownloadCard(Download download, {bool isGrouped = false}) {
     final canPlay = download.status == DownloadStatus.completed &&
         download.filePath != null;
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: isGrouped
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+          : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: InkWell(
         onTap: canPlay
             ? () {
@@ -190,31 +243,37 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
         child: Column(
           children: [
             ListTile(
-              leading: download.animeImage != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: CachedNetworkImage(
-                        imageUrl: download.animeImage!,
-                        width: 50,
-                        height: 70,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                  : Container(
-                      width: 50,
-                      height: 70,
-                      color: Colors.grey[800],
-                      child: const Icon(Icons.movie),
-                    ),
+              // Hide image when grouped (already shown in ExpansionTile)
+              leading: isGrouped
+                  ? null
+                  : download.animeImage != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: CachedNetworkImage(
+                            imageUrl: download.animeImage!,
+                            width: 50,
+                            height: 70,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Container(
+                          width: 50,
+                          height: 70,
+                          color: Colors.grey[800],
+                          child: const Icon(Icons.movie),
+                        ),
+              // Show only episode when grouped, full title when not
               title: Text(
-                download.animeTitle,
+                isGrouped
+                    ? 'Episode ${download.episodeNumber}'
+                    : download.animeTitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Episode ${download.episodeNumber}'),
+                  if (!isGrouped) Text('Episode ${download.episodeNumber}'),
                   Text('${download.quality} - ${download.formattedSize}'),
                 ],
               ),

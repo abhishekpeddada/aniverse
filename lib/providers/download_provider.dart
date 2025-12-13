@@ -58,6 +58,14 @@ final storageUsageProvider = FutureProvider<int>((ref) {
   return service.getStorageUsed();
 });
 
+// Stream provider for real-time storage updates
+final storageUsageStreamProvider = StreamProvider<int>((ref) {
+  final service = ref.watch(downloadServiceProvider);
+  return Stream.periodic(const Duration(seconds: 1), (_) async {
+    return await service.getStorageUsed();
+  }).asyncMap((future) => future);
+});
+
 final isEpisodeDownloadedProvider =
     Provider.family<bool, String>((ref, episodeId) {
   final storage = ref.watch(downloadStorageServiceProvider);

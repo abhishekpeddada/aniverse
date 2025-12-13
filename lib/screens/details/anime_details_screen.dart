@@ -376,24 +376,29 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
     Episode episode,
     Anime anime,
   ) async {
-    final quality = await showDialog<String>(
+    final translationType = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Select Quality'),
+        title: const Text('Select Audio'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: DownloadQuality.allQualities.map((q) {
-            return ListTile(
-              title: Text(q),
-              trailing: Text(_getQualitySize(q)),
-              onTap: () => Navigator.pop(context, q),
-            );
-          }).toList(),
+          children: [
+            ListTile(
+              title: const Text('SUB (Subtitled)'),
+              leading: const Icon(Icons.subtitles),
+              onTap: () => Navigator.pop(context, 'sub'),
+            ),
+            ListTile(
+              title: const Text('DUB (Dubbed)'),
+              leading: const Icon(Icons.record_voice_over),
+              onTap: () => Navigator.pop(context, 'dub'),
+            ),
+          ],
         ),
       ),
     );
 
-    if (quality != null && context.mounted) {
+    if (translationType != null && context.mounted) {
       final downloadService = ref.read(downloadServiceProvider);
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -405,6 +410,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
 
       try {
         String? downloadUrl;
+        String quality = 'default'; // Use default quality
 
         if (episode.id.startsWith('raiden_')) {
           final raidenData = ref.read(raidenAnimeDetailsProvider(episode.id));
@@ -414,7 +420,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
         } else {
           final sources = await ref.read(episodeSourcesWithTypeProvider((
             episodeId: episode.id,
-            translationType: 'sub', // Default to SUB
+            translationType: translationType, // Use selected type
           )).future);
 
           if (sources != null &&
@@ -423,36 +429,27 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
             final sourcesList =
                 List<Map<String, dynamic>>.from(sources['sources'] as List);
 
-            var matchingSource = sourcesList.where((s) {
-              final url = s['url'].toString();
-              final sourceQuality = s['quality'].toString().toLowerCase();
-              final requestedQuality = quality.toLowerCase();
+            // Prefer non-M3U8 sources, otherwise use first available
+            var nonM3u8Sources = sourcesList
+                .where((s) => !s['url'].toString().contains('.m3u8'))
+                .toList();
 
-              return !url.contains('.m3u8') &&
-                  (sourceQuality
-                          .contains(requestedQuality.replaceAll('p', '')) ||
-                      sourceQuality == 'default');
-            }).toList();
-
-            if (matchingSource.isEmpty) {
-              matchingSource = sourcesList
-                  .where((s) => !s['url'].toString().contains('.m3u8'))
-                  .toList();
-            }
-
-            if (matchingSource.isEmpty) {
+            if (nonM3u8Sources.isNotEmpty) {
+              downloadUrl = nonM3u8Sources.first['url'] as String?;
+              quality =
+                  nonM3u8Sources.first['quality']?.toString() ?? 'default';
+            } else {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text(
-                        'Only streaming sources available - quality selection limited'),
+                        'Only streaming sources available - download may not work'),
                     duration: Duration(seconds: 3),
                   ),
                 );
               }
               downloadUrl = sourcesList[0]['url'] as String?;
-            } else {
-              downloadUrl = matchingSource.first['url'] as String?;
+              quality = sourcesList[0]['quality']?.toString() ?? 'default';
             }
           }
         }
@@ -469,9 +466,10 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
 
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Download started!'),
-              duration: Duration(seconds: 2),
+            SnackBar(
+              content:
+                  Text('Download started! (${translationType.toUpperCase()})'),
+              duration: const Duration(seconds: 2),
             ),
           );
         }
