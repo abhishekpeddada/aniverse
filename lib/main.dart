@@ -5,28 +5,28 @@ import 'package:media_kit/media_kit.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'core/theme/app_theme.dart';
 import 'services/storage_service.dart';
+import 'services/download_storage_service.dart';
 import 'screens/home/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize Firebase
   await Firebase.initializeApp();
-  
+
   // Initialize media_kit
   MediaKit.ensureInitialized();
-  
+
   // Initialize Hive storage
   await StorageService.init();
-  
-  // TEMPORARY: Clear anime cache to fix schema changes
-  // This clears cached anime that don't have the new 'source' field
+  await DownloadStorageService.init();
+
   try {
     await StorageService.clearAnimeCache();
   } catch (e) {
     debugPrint('Error clearing anime cache: $e');
   }
-  
+
   runApp(
     const ProviderScope(
       child: MyApp(),

@@ -5,7 +5,10 @@ import '../../providers/anime_provider.dart';
 import '../../providers/lists_provider.dart';
 import '../../providers/storage_provider.dart';
 import '../../providers/raiden_provider.dart';
+import '../../providers/download_provider.dart';
 import '../../models/episode_model.dart';
+import '../../models/anime_model.dart';
+import '../../models/download_model.dart';
 import '../player/video_player_screen.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 
@@ -14,7 +17,7 @@ class AnimeDetailsScreen extends ConsumerStatefulWidget {
   final String? continueEpisodeId;
 
   const AnimeDetailsScreen({
-    super.key, 
+    super.key,
     required this.animeId,
     this.continueEpisodeId,
   });
@@ -36,18 +39,18 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final isRaiden = widget.animeId.startsWith('raiden_');
-    
+
     // For Raiden anime, get data from cached provider
     if (isRaiden) {
       final raidenData = ref.watch(raidenAnimeDetailsProvider(widget.animeId));
       return _buildRaidenDetails(context, raidenData);
     }
-    
+
     // For AllAnime, use existing logic
     final animeDetails = ref.watch(animeDetailsProvider(widget.animeId));
     final watchlist = ref.watch(watchlistProvider);
     final favorites = ref.watch(favoritesProvider);
-    
+
     final isInWatchlist = watchlist.contains(widget.animeId);
     final isInFavorites = favorites.contains(widget.animeId);
     final storageService = ref.watch(storageServiceProvider);
@@ -63,7 +66,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
 
           final anime = data['anime'];
           final episodes = data['episodes'] as List<Episode>;
-          
+
           // Cache the anime for watchlist/favorites display
           storageService.cacheAnime(anime);
 
@@ -116,15 +119,23 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 if (isInWatchlist) {
-                                  ref.read(watchlistProvider.notifier).removeFromWatchlist(widget.animeId);
+                                  ref
+                                      .read(watchlistProvider.notifier)
+                                      .removeFromWatchlist(widget.animeId);
                                 } else {
-                                  ref.read(watchlistProvider.notifier).addToWatchlist(widget.animeId);
+                                  ref
+                                      .read(watchlistProvider.notifier)
+                                      .addToWatchlist(widget.animeId);
                                 }
                               },
                               icon: Icon(
-                                isInWatchlist ? Icons.bookmark : Icons.bookmark_border,
+                                isInWatchlist
+                                    ? Icons.bookmark
+                                    : Icons.bookmark_border,
                               ),
-                              label: Text(isInWatchlist ? 'In Watchlist' : 'Add to Watchlist'),
+                              label: Text(isInWatchlist
+                                  ? 'In Watchlist'
+                                  : 'Add to Watchlist'),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -132,15 +143,23 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 if (isInFavorites) {
-                                  ref.read(favoritesProvider.notifier).removeFromFavorites(widget.animeId);
+                                  ref
+                                      .read(favoritesProvider.notifier)
+                                      .removeFromFavorites(widget.animeId);
                                 } else {
-                                  ref.read(favoritesProvider.notifier).addToFavorites(widget.animeId);
+                                  ref
+                                      .read(favoritesProvider.notifier)
+                                      .addToFavorites(widget.animeId);
                                 }
                               },
                               icon: Icon(
-                                isInFavorites ? Icons.favorite : Icons.favorite_border,
+                                isInFavorites
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
                               ),
-                              label: Text(isInFavorites ? 'Favorited' : 'Add to Favorites'),
+                              label: Text(isInFavorites
+                                  ? 'Favorited'
+                                  : 'Add to Favorites'),
                             ),
                           ),
                         ],
@@ -153,7 +172,9 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                           children: anime.genres!
                               .map((genre) => Chip(
                                     label: Text(genre),
-                                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                                    backgroundColor: Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer,
                                   ))
                               .toList(),
                         ),
@@ -240,16 +261,19 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                       if (_searchQuery.isEmpty) return true;
                       final epNum = ep.number.toString();
                       final epTitle = ep.title?.toLowerCase() ?? '';
-                      return epNum.contains(_searchQuery) || epTitle.contains(_searchQuery);
+                      return epNum.contains(_searchQuery) ||
+                          epTitle.contains(_searchQuery);
                     }).toList();
-                    
+
                     if (index >= filteredEpisodes.length) return null;
-                    
+
                     final episode = filteredEpisodes[index];
-                    final isNextToWatch = episode.id == widget.continueEpisodeId;
-                    
+                    final isNextToWatch =
+                        episode.id == widget.continueEpisodeId;
+
                     return Container(
-                      color: isNextToWatch ? Colors.red.withOpacity(0.15) : null,
+                      color:
+                          isNextToWatch ? Colors.red.withOpacity(0.15) : null,
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: isNextToWatch ? Colors.red : null,
@@ -258,13 +282,55 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                         ),
                         title: Text(
                           episode.title ?? 'Episode ${episode.number}',
-                          style: isNextToWatch 
-                              ? const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)
+                          style: isNextToWatch
+                              ? const TextStyle(
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.bold)
                               : null,
                         ),
-                        trailing: Icon(
-                          Icons.play_arrow,
-                          color: isNextToWatch ? Colors.red : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Consumer(
+                              builder: (context, ref, _) {
+                                final isDownloaded = ref.watch(
+                                  isEpisodeDownloadedProvider(episode.id),
+                                );
+
+                                return IconButton(
+                                  icon: Icon(
+                                    isDownloaded
+                                        ? Icons.download_done
+                                        : Icons.download_outlined,
+                                    color: isDownloaded ? Colors.green : null,
+                                  ),
+                                  onPressed: () {
+                                    if (isDownloaded) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                              'Episode already downloaded'),
+                                          duration: Duration(seconds: 1),
+                                        ),
+                                      );
+                                    } else {
+                                      _showDownloadDialog(
+                                        context,
+                                        ref,
+                                        episode,
+                                        anime,
+                                      );
+                                    }
+                                  },
+                                );
+                              },
+                            ),
+                            Icon(
+                              Icons.play_arrow,
+                              color: isNextToWatch ? Colors.red : null,
+                            ),
+                          ],
                         ),
                         onTap: () {
                           Navigator.push(
@@ -304,8 +370,150 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
     );
   }
 
+  Future<void> _showDownloadDialog(
+    BuildContext context,
+    WidgetRef ref,
+    Episode episode,
+    Anime anime,
+  ) async {
+    final quality = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Quality'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: DownloadQuality.allQualities.map((q) {
+            return ListTile(
+              title: Text(q),
+              trailing: Text(_getQualitySize(q)),
+              onTap: () => Navigator.pop(context, q),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+
+    if (quality != null && context.mounted) {
+      final downloadService = ref.read(downloadServiceProvider);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Fetching video URL...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      try {
+        String? downloadUrl;
+
+        if (episode.id.startsWith('raiden_')) {
+          final raidenData = ref.read(raidenAnimeDetailsProvider(episode.id));
+          if (raidenData != null && raidenData['download_url'] != null) {
+            downloadUrl = raidenData['download_url'] as String;
+          }
+        } else {
+          final sources = await ref.read(episodeSourcesWithTypeProvider((
+            episodeId: episode.id,
+            translationType: 'sub', // Default to SUB
+          )).future);
+
+          if (sources != null &&
+              sources['sources'] != null &&
+              (sources['sources'] as List).isNotEmpty) {
+            final sourcesList =
+                List<Map<String, dynamic>>.from(sources['sources'] as List);
+
+            var matchingSource = sourcesList.where((s) {
+              final url = s['url'].toString();
+              final sourceQuality = s['quality'].toString().toLowerCase();
+              final requestedQuality = quality.toLowerCase();
+
+              return !url.contains('.m3u8') &&
+                  (sourceQuality
+                          .contains(requestedQuality.replaceAll('p', '')) ||
+                      sourceQuality == 'default');
+            }).toList();
+
+            if (matchingSource.isEmpty) {
+              matchingSource = sourcesList
+                  .where((s) => !s['url'].toString().contains('.m3u8'))
+                  .toList();
+            }
+
+            if (matchingSource.isEmpty) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                        'Only streaming sources available - quality selection limited'),
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+              }
+              downloadUrl = sourcesList[0]['url'] as String?;
+            } else {
+              downloadUrl = matchingSource.first['url'] as String?;
+            }
+          }
+        }
+
+        if (downloadUrl == null) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('No video URL available for download')),
+            );
+          }
+          return;
+        }
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Download started!'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+
+        await downloadService.startDownload(
+          animeId: widget.animeId,
+          animeTitle: anime.title,
+          animeImage: anime.image,
+          episodeId: episode.id,
+          episodeNumber: episode.number,
+          episodeTitle: episode.title,
+          downloadUrl: downloadUrl,
+          quality: quality,
+        );
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Download failed: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  String _getQualitySize(String quality) {
+    switch (quality) {
+      case '360p':
+        return '~100MB';
+      case '480p':
+        return '~200MB';
+      case '720p':
+        return '~400MB';
+      case '1080p':
+        return '~800MB';
+      default:
+        return '';
+    }
+  }
+
   // Build Raiden anime details (simplified - direct to video)
-  Widget _buildRaidenDetails(BuildContext context, Map<String, dynamic>? raidenData) {
+  Widget _buildRaidenDetails(
+      BuildContext context, Map<String, dynamic>? raidenData) {
     if (raidenData == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Not Found')),
@@ -352,7 +560,8 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
               icon: const Icon(Icons.play_arrow),
               label: const Text('Play Video'),
               style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
               ),
             ),
           ],

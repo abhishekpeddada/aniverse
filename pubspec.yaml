@@ -43,6 +43,9 @@ dependencies:
   screen_brightness: ^2.1.7
   flutter_widget_from_html: ^0.17.1
   native_device_orientation: ^2.1.0
+  permission_handler: ^11.3.1
+  flutter_local_notifications: ^18.0.1
+  flutter_foreground_task: ^8.13.0
 
 dev_dependencies:
   flutter_test:

@@ -24,6 +24,8 @@ class VideoPlayerScreen extends ConsumerStatefulWidget {
   final String animeTitle;
   final String? animeImage;
   final int episodeNumber;
+  final bool isOffline;
+  final String? offlineFilePath;
 
   const VideoPlayerScreen({
     super.key,
@@ -32,6 +34,8 @@ class VideoPlayerScreen extends ConsumerStatefulWidget {
     required this.animeTitle,
     this.animeImage,
     required this.episodeNumber,
+    this.isOffline = false,
+    this.offlineFilePath,
   });
 
   @override
@@ -271,6 +275,19 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   Future<void> _initializePlayer() async {
     try {
+      if (widget.isOffline && widget.offlineFilePath != null) {
+        debugPrint('🎬 Playing offline: ${widget.offlineFilePath}');
+
+        await player.open(Media(widget.offlineFilePath!));
+
+        setState(() {
+          isInitialized = true;
+        });
+
+        await player.play();
+        return;
+      }
+
       // Check if this is a Raiden source (episodeId starts with raiden_)
       if (widget.episodeId.startsWith('raiden_')) {
         debugPrint('🎬 Playing Raiden content: ${widget.episodeId}');

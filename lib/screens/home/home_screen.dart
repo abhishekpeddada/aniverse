@@ -4,6 +4,7 @@ import '../search/search_screen.dart';
 import '../lists/watchlist_screen.dart';
 import '../lists/favorites_screen.dart';
 import '../latest/latest_releases_screen.dart';
+import '../downloads/downloads_screen.dart';
 import 'widgets/continue_watching_section.dart';
 import '../profile/profile_screen.dart';
 import '../auth/login_screen.dart';
@@ -23,6 +24,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     const HomePage(),
     const SearchScreen(),
     const LatestReleasesScreen(),
+    const DownloadsScreen(),
     const WatchlistScreen(),
     const FavoritesScreen(),
   ];
@@ -40,8 +42,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         },
         type: BottomNavigationBarType.fixed,
         backgroundColor: Colors.black,
-        selectedItemColor: Colors.purpleAccent, 
-        unselectedItemColor: Colors.grey, 
+        selectedItemColor: Colors.purpleAccent,
+        unselectedItemColor: Colors.grey,
         selectedFontSize: 12,
         unselectedFontSize: 12,
         items: const [
@@ -56,6 +58,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.new_releases),
             label: 'Latest',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.download),
+            label: 'Downloads',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.bookmark),
