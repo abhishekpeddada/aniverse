@@ -81,6 +81,111 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   StreamSubscription<NativeDeviceOrientation>?
       _orientationSubscription; // To prevent error triggering during seek
 
+  // Controls visibility
+  bool _showControls = true;
+  Timer? _hideControlsTimer;
+
+  // Playback speed
+  double _playbackSpeed = 1.0;
+
+  void _resetHideTimer() {
+    _hideControlsTimer?.cancel();
+    setState(() {
+      _showControls = true;
+    });
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() {
+          _showControls = false;
+        });
+      }
+    });
+  }
+
+  void _toggleControls() {
+    setState(() {
+      _showControls = !_showControls;
+    });
+    if (_showControls) {
+      _resetHideTimer();
+    } else {
+      _hideControlsTimer?.cancel();
+    }
+  }
+
+  void _showPlaybackSpeedDialog() {
+    _resetHideTimer();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Playback Speed'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children:
+                  [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map((speed) {
+                return RadioListTile<double>(
+                  title: Text('${speed}x'),
+                  value: speed,
+                  groupValue: _playbackSpeed,
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _playbackSpeed = value;
+                      });
+                      player.setRate(value);
+                      Navigator.pop(context);
+                    }
+                  },
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showVolumeDialog() {
+    _resetHideTimer();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Volume'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${(_volume * 100).round()}%',
+                      style: const TextStyle(fontSize: 24)),
+                  Slider(
+                    value: _volume,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    label: '${(_volume * 100).round()}%',
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _volume = value;
+                      });
+                      setState(() {
+                        _volume = value;
+                      });
+                      player.setVolume(_volume * 100);
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
@@ -104,6 +209,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     _initializePlayer();
     _setupPositionListener();
     _initSystemControls();
+
+    // Start auto-hide timer for controls
+    _resetHideTimer();
   }
 
   Future<void> _loadAutoRotatePreference() async {
@@ -626,255 +734,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         body: isInitialized
             ? Stack(
                 children: [
-                  // 1. Video Player with Native Controls
-                  MaterialVideoControlsTheme(
-                    normal: MaterialVideoControlsThemeData(
-                      padding: const EdgeInsets.only(
-                          left: 16, right: 16, bottom: 20),
-                      topButtonBar: [
-                        // Sub/Dub Toggle
-                        // Always show sub/dub button
-                        MaterialCustomButton(
-                          onPressed: _toggleTranslationType,
-                          icon: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black45,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              _translationType.toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Quality Selector
-                        if (_availableSources.length > 1)
-                          MaterialCustomButton(
-                            onPressed: () {
-                              QualitySelector.show(
-                                context: context,
-                                sources: _availableSources,
-                                currentIndex: _currentSourceIndex,
-                                onQualitySelected: _switchSource,
-                              );
-                            },
-                            icon: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.hd,
-                                    color: Colors.white, size: 20),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _availableSources[_currentSourceIndex]
-                                      ['quality'] as String,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        const Spacer(),
-                        // Fit/Zoom Toggle
-                        MaterialCustomButton(
-                          onPressed: () {
-                            setState(() {
-                              switch (_fit) {
-                                case BoxFit.contain:
-                                  _fit = BoxFit.cover;
-                                  break;
-                                case BoxFit.cover:
-                                  _fit = BoxFit.fill;
-                                  break;
-                                case BoxFit.fill:
-                                  _fit = BoxFit.fitWidth;
-                                  break;
-                                default:
-                                  _fit = BoxFit.contain;
-                              }
-                            });
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _fit == BoxFit.contain
-                                      ? 'Fit to Screen'
-                                      : _fit == BoxFit.cover
-                                          ? 'Zoom to Fill'
-                                          : _fit == BoxFit.fill
-                                              ? 'Stretch to Fill'
-                                              : 'Full Width',
-                                  textAlign: TextAlign.center,
-                                ),
-                                duration: const Duration(milliseconds: 1000),
-                                behavior: SnackBarBehavior.floating,
-                                backgroundColor: Colors.black87,
-                                width: 200,
-                              ),
-                            );
-                          },
-                          icon: Icon(
-                            _fit == BoxFit.contain
-                                ? Icons.fullscreen_exit
-                                : _fit == BoxFit.cover
-                                    ? Icons.zoom_out_map
-                                    : _fit == BoxFit.fill
-                                        ? Icons.aspect_ratio
-                                        : Icons.fit_screen,
-                            color: Colors.white,
-                          ),
-                        ),
-                        MaterialCustomButton(
-                          onPressed: _toggleAutoRotate,
-                          icon: Icon(
-                            _autoRotateEnabled
-                                ? Icons.screen_rotation
-                                : Icons.screen_lock_rotation,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                      bottomButtonBar: [
-                        const MaterialPlayOrPauseButton(),
-                        const MaterialPositionIndicator(),
-                        const Spacer(),
-                      ],
-                    ),
-                    fullscreen: MaterialVideoControlsThemeData(
-                      padding: const EdgeInsets.only(
-                          left: 16, right: 16, bottom: 20),
-                      topButtonBar: [
-                        // Sub/Dub Toggle
-                        // Always show sub/dub button
-                        MaterialCustomButton(
-                          onPressed: _toggleTranslationType,
-                          icon: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black45,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              _translationType.toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Quality Selector
-                        if (_availableSources.length > 1)
-                          MaterialCustomButton(
-                            onPressed: () {
-                              QualitySelector.show(
-                                context: context,
-                                sources: _availableSources,
-                                currentIndex: _currentSourceIndex,
-                                onQualitySelected: _switchSource,
-                              );
-                            },
-                            icon: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.hd,
-                                    color: Colors.white, size: 20),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _availableSources[_currentSourceIndex]
-                                      ['quality'] as String,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        const Spacer(),
-                        // Fit/Zoom Toggle
-                        MaterialCustomButton(
-                          onPressed: () {
-                            setState(() {
-                              switch (_fit) {
-                                case BoxFit.contain:
-                                  _fit = BoxFit.cover;
-                                  break;
-                                case BoxFit.cover:
-                                  _fit = BoxFit.fill;
-                                  break;
-                                case BoxFit.fill:
-                                  _fit = BoxFit.fitWidth;
-                                  break;
-                                default:
-                                  _fit = BoxFit.contain;
-                              }
-                            });
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _fit == BoxFit.contain
-                                      ? 'Fit to Screen'
-                                      : _fit == BoxFit.cover
-                                          ? 'Zoom to Fill'
-                                          : _fit == BoxFit.fill
-                                              ? 'Stretch to Fill'
-                                              : 'Full Width',
-                                  textAlign: TextAlign.center,
-                                ),
-                                duration: const Duration(milliseconds: 1000),
-                                behavior: SnackBarBehavior.floating,
-                                backgroundColor: Colors.black87,
-                                width: 200,
-                              ),
-                            );
-                          },
-                          icon: Icon(
-                            _fit == BoxFit.contain
-                                ? Icons.fullscreen_exit
-                                : _fit == BoxFit.cover
-                                    ? Icons.zoom_out_map
-                                    : _fit == BoxFit.fill
-                                        ? Icons.aspect_ratio
-                                        : Icons.fit_screen,
-                            color: Colors.white,
-                          ),
-                        ),
-                        MaterialCustomButton(
-                          onPressed: _toggleAutoRotate,
-                          icon: Icon(
-                            _autoRotateEnabled
-                                ? Icons.screen_rotation
-                                : Icons.screen_lock_rotation,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                      bottomButtonBar: [
-                        const MaterialPlayOrPauseButton(),
-                        const MaterialPositionIndicator(),
-                        const Spacer(),
-                      ],
-                    ),
-                    child: Center(
-                      child: Video(
-                        controller: controller,
-                        controls: MaterialVideoControls,
-                        fit: _fit,
-                        fill: Colors.black,
-                      ),
+                  // 1. Raw Video Player (no default controls)
+                  Center(
+                    child: Video(
+                      controller: controller,
+                      controls: NoVideoControls,
+                      fit: _fit,
+                      fill: Colors.black,
                     ),
                   ),
 
@@ -1037,6 +903,330 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                         ),
                       ),
                     ),
+
+                  // 3. Modern Custom Controls Overlay
+                  GestureDetector(
+                    onTap: _toggleControls,
+                    behavior: HitTestBehavior.translucent,
+                    child: AnimatedOpacity(
+                      opacity: _showControls ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 300),
+                      child: IgnorePointer(
+                        ignoring: !_showControls,
+                        child: StreamBuilder<bool>(
+                          stream: player.stream.playing,
+                          builder: (context, playingSnapshot) {
+                            return StreamBuilder<Duration>(
+                              stream: player.stream.position,
+                              builder: (context, positionSnapshot) {
+                                return StreamBuilder<Duration>(
+                                  stream: player.stream.duration,
+                                  builder: (context, durationSnapshot) {
+                                    final isPlaying =
+                                        playingSnapshot.data ?? false;
+                                    final position =
+                                        positionSnapshot.data ?? Duration.zero;
+                                    final duration =
+                                        durationSnapshot.data ?? Duration.zero;
+                                    final progress = duration.inMilliseconds > 0
+                                        ? position.inMilliseconds /
+                                            duration.inMilliseconds
+                                        : 0.0;
+
+                                    return Stack(
+                                      children: [
+                                        // Top Bar
+                                        Positioned(
+                                          top: 0,
+                                          left: 0,
+                                          right: 0,
+                                          child: Container(
+                                            padding: EdgeInsets.only(
+                                              top: MediaQuery.of(context)
+                                                      .padding
+                                                      .top +
+                                                  4,
+                                              left: 4,
+                                              right: 4,
+                                              bottom: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: [
+                                                  Colors.black.withOpacity(0.7),
+                                                  Colors.transparent,
+                                                ],
+                                              ),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                IconButton(
+                                                  icon: const Icon(
+                                                      Icons.arrow_back,
+                                                      color: Colors.white),
+                                                  onPressed: () =>
+                                                      Navigator.pop(context),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    '${widget.animeTitle} - Episode ${widget.episodeNumber}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                IconButton(
+                                                  icon: Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 4),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black45,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              4),
+                                                    ),
+                                                    child: Text(
+                                                      _translationType
+                                                          .toUpperCase(),
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  onPressed: () {
+                                                    _resetHideTimer();
+                                                    _toggleTranslationType();
+                                                  },
+                                                ),
+                                                if (_availableSources.length >
+                                                    1)
+                                                  IconButton(
+                                                    icon: const Icon(Icons.hd,
+                                                        color: Colors.white),
+                                                    onPressed: () {
+                                                      QualitySelector.show(
+                                                        context: context,
+                                                        sources:
+                                                            _availableSources,
+                                                        currentIndex:
+                                                            _currentSourceIndex,
+                                                        onQualitySelected:
+                                                            _switchSource,
+                                                      );
+                                                    },
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+
+                                        // Center Play/Pause Button
+                                        Center(
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color:
+                                                  Colors.black.withOpacity(0.3),
+                                            ),
+                                            child: IconButton(
+                                              iconSize: 72,
+                                              icon: Icon(
+                                                isPlaying
+                                                    ? Icons.pause
+                                                    : Icons.play_arrow,
+                                                color: Colors.white,
+                                                size: 72,
+                                              ),
+                                              onPressed: () {
+                                                if (isPlaying) {
+                                                  player.pause();
+                                                } else {
+                                                  player.play();
+                                                }
+                                              },
+                                            ),
+                                          ),
+                                        ),
+
+                                        // Bottom Bar
+                                        Positioned(
+                                          bottom: 0,
+                                          left: 0,
+                                          right: 0,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.bottomCenter,
+                                                end: Alignment.topCenter,
+                                                colors: [
+                                                  Colors.black.withOpacity(0.8),
+                                                  Colors.transparent,
+                                                ],
+                                              ),
+                                            ),
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                // Timestamps Row
+                                                Padding(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(horizontal: 8),
+                                                  child: Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
+                                                    children: [
+                                                      Text(
+                                                        _formatDuration(
+                                                            position),
+                                                        style: const TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: 12),
+                                                      ),
+                                                      Text(
+                                                        _formatDuration(
+                                                            duration),
+                                                        style: TextStyle(
+                                                          color: Colors.white
+                                                              .withOpacity(0.7),
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                // Progress Slider
+                                                SliderTheme(
+                                                  data: SliderThemeData(
+                                                    activeTrackColor:
+                                                        Colors.red,
+                                                    inactiveTrackColor: Colors
+                                                        .white
+                                                        .withOpacity(0.3),
+                                                    thumbColor: Colors.red,
+                                                    thumbShape:
+                                                        const RoundSliderThumbShape(
+                                                            enabledThumbRadius:
+                                                                5),
+                                                    overlayShape:
+                                                        const RoundSliderOverlayShape(
+                                                            overlayRadius: 10),
+                                                    trackHeight: 3,
+                                                  ),
+                                                  child: Slider(
+                                                    value: progress.clamp(
+                                                        0.0, 1.0),
+                                                    onChanged: (value) {
+                                                      final seekPosition =
+                                                          Duration(
+                                                        milliseconds: (value *
+                                                                duration
+                                                                    .inMilliseconds)
+                                                            .round(),
+                                                      );
+                                                      player.seek(seekPosition);
+                                                    },
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                // Control Icons Row
+                                                Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment
+                                                          .spaceEvenly,
+                                                  children: [
+                                                    IconButton(
+                                                      icon: Icon(
+                                                        _autoRotateEnabled
+                                                            ? Icons
+                                                                .screen_rotation
+                                                            : Icons
+                                                                .screen_lock_rotation,
+                                                        color: Colors.white,
+                                                        size: 20,
+                                                      ),
+                                                      onPressed:
+                                                          _toggleAutoRotate,
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(
+                                                        _fit == BoxFit.contain
+                                                            ? Icons.fit_screen
+                                                            : _fit ==
+                                                                    BoxFit.cover
+                                                                ? Icons
+                                                                    .zoom_out_map
+                                                                : Icons
+                                                                    .aspect_ratio,
+                                                        color: Colors.white,
+                                                        size: 20,
+                                                      ),
+                                                      onPressed: () {
+                                                        setState(() {
+                                                          _fit = _fit ==
+                                                                  BoxFit.contain
+                                                              ? BoxFit.cover
+                                                              : _fit ==
+                                                                      BoxFit
+                                                                          .cover
+                                                                  ? BoxFit.fill
+                                                                  : BoxFit
+                                                                      .contain;
+                                                        });
+                                                      },
+                                                    ),
+                                                    IconButton(
+                                                      icon: const Icon(
+                                                          Icons.volume_up,
+                                                          color: Colors.white,
+                                                          size: 20),
+                                                      onPressed: () {
+                                                        _resetHideTimer();
+                                                        _showVolumeDialog();
+                                                      },
+                                                    ),
+                                                    IconButton(
+                                                      icon: const Icon(
+                                                          Icons.settings,
+                                                          color: Colors.white,
+                                                          size: 20),
+                                                      onPressed: () {
+                                                        _resetHideTimer();
+                                                        _showPlaybackSpeedDialog();
+                                                      },
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               )
             : Center(
