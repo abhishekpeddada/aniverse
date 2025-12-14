@@ -88,6 +88,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   // Playback speed
   double _playbackSpeed = 1.0;
 
+  // Picture-in-Picture state
+  bool _isInPipMode = false;
+
   Timer? _historySaveTimer;
 
   void _resetHideTimer() {
@@ -193,6 +196,45 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
     String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
     return "${duration.inHours > 0 ? '${twoDigits(duration.inHours)}:' : ''}$twoDigitMinutes:$twoDigitSeconds";
+  }
+
+  Future<void> _enterPictureInPicture() async {
+    if (!Platform.isAndroid) {
+      _showMessage('PiP is only available on Android');
+      return;
+    }
+
+    try {
+      const platform = MethodChannel('com.animeapp.aniverse/pip');
+      final result = await platform.invokeMethod('enterPipMode');
+
+      if (result == true) {
+        setState(() {
+          _isInPipMode = true;
+          _showControls = false;
+        });
+        debugPrint('Entered PiP mode');
+      } else {
+        _showMessage('PiP not available on this device');
+      }
+    } on PlatformException catch (e) {
+      debugPrint('PiP PlatformException: ${e.code} - ${e.message}');
+      _showMessage('Failed to enter PiP: ${e.message}');
+    } catch (e) {
+      debugPrint('PiP error: $e');
+      _showMessage('PiP error: ${e.toString()}');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   @override
@@ -1326,6 +1368,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                                                         _showPlaybackSpeedDialog();
                                                       },
                                                     ),
+                                                    // Picture-in-Picture button (Android only)
+                                                    if (Platform.isAndroid)
+                                                      IconButton(
+                                                        icon: const Icon(
+                                                            Icons
+                                                                .picture_in_picture_alt,
+                                                            color: Colors.white,
+                                                            size: 20),
+                                                        onPressed: () {
+                                                          _enterPictureInPicture();
+                                                        },
+                                                      ),
                                                   ],
                                                 ),
                                               ],
