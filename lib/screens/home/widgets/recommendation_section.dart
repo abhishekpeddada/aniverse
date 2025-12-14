@@ -54,17 +54,22 @@ class RecommendationSection extends StatelessWidget {
   }
 
   Widget _buildAnimeCard(BuildContext context, Anime anime) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => AnimeDetailsScreen(animeId: anime.id),
-          ),
-        );
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+    if (anime.image == null || anime.image!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: 130,
+      margin: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AnimeDetailsScreen(animeId: anime.id),
+            ),
+          );
+        },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -73,13 +78,31 @@ class RecommendationSection extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.network(
-                  anime.image ?? '',
+                  anime.image!,
                   width: 130,
                   fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      width: 130,
+                      color: Colors.grey[850],
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                  loadingProgress.expectedTotalBytes!
+                              : null,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    );
+                  },
                   errorBuilder: (context, error, stackTrace) {
                     return Container(
-                      color: Colors.grey[800],
-                      child: const Icon(Icons.broken_image, size: 40),
+                      width: 130,
+                      color: Colors.grey[850],
+                      child: const Icon(Icons.broken_image,
+                          color: Colors.grey, size: 40),
                     );
                   },
                 ),
@@ -88,15 +111,18 @@ class RecommendationSection extends StatelessWidget {
 
             const SizedBox(height: 6),
 
-            // Title
-            Text(
-              anime.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                height: 1.2,
+            // Title - ALWAYS SHOWN
+            SizedBox(
+              width: 130,
+              child: Text(
+                anime.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  height: 1.2,
+                ),
               ),
             ),
           ],
