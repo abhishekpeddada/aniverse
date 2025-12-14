@@ -8,6 +8,7 @@ import '../screens/lists/watchlist_screen.dart';
 import '../screens/lists/favorites_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/settings/notification_settings_screen.dart';
 import 'dart:io';
 
 class AppDrawer extends ConsumerWidget {
@@ -131,6 +132,21 @@ class AppDrawer extends ConsumerWidget {
                       builder: (context) => const ProfileScreen()),
                 );
               }
+            },
+          ),
+          _buildDrawerItem(
+            context,
+            icon: Icons.notifications,
+            title: 'Notifications',
+            route: '/notification-settings',
+            currentRoute: currentRoute,
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const NotificationSettingsScreen()),
+              );
             },
           ),
         ],

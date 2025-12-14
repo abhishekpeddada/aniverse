@@ -8,6 +8,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'core/theme/app_theme.dart';
 import 'services/storage_service.dart';
 import 'services/download_storage_service.dart';
+import 'services/notification_storage.dart';
+import 'services/notification_service.dart';
+import 'services/background_episode_checker.dart';
 import 'screens/home/home_screen.dart';
 
 void main() async {
@@ -29,6 +32,17 @@ void main() async {
   // Initialize Hive storage
   await StorageService.init();
   await DownloadStorageService.init();
+
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    await NotificationStorage.initialize();
+    await NotificationService().initialize();
+    await BackgroundEpisodeChecker.initialize();
+
+    final settings = await NotificationStorage.getSettings();
+    if (settings.newEpisodeAlerts) {
+      await BackgroundEpisodeChecker.registerBackgroundTask();
+    }
+  }
 
   try {
     await StorageService.clearAnimeCache();
