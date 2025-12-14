@@ -2,81 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../search/search_screen.dart';
-import '../lists/watchlist_screen.dart';
-import '../lists/favorites_screen.dart';
-import '../latest/latest_releases_screen.dart';
-import '../downloads/downloads_screen.dart';
 import 'widgets/continue_watching_section.dart';
+import 'widgets/recommendation_section.dart';
 import '../profile/profile_screen.dart';
 import '../auth/login_screen.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/local_settings_provider.dart';
+import '../../providers/recommendation_provider.dart';
+import '../../widgets/app_drawer.dart';
 
-class HomeScreen extends ConsumerStatefulWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends ConsumerState<HomeScreen> {
-  int _currentIndex = 0;
-
-  final List<Widget> _screens = [
-    const HomePage(),
-    const SearchScreen(),
-    const LatestReleasesScreen(),
-    const DownloadsScreen(),
-    const WatchlistScreen(),
-    const FavoritesScreen(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.black,
-        selectedItemColor: Colors.purpleAccent,
-        unselectedItemColor: Colors.grey,
-        selectedFontSize: 12,
-        unselectedFontSize: 12,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            label: 'Search',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.new_releases),
-            label: 'Latest',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.download),
-            label: 'Downloads',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bookmark),
-            label: 'Watchlist',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.favorite),
-            label: 'Favorites',
-          ),
-        ],
-      ),
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const HomePage();
   }
 }
 
@@ -84,12 +24,16 @@ class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   void _showSettingsDialog(BuildContext context, WidgetRef ref) {
+    final localSettings = ref.read(localSettingsProvider);
+    final allowAdult = localSettings['allowAdult'] as bool? ?? false;
+
     showDialog(
       context: context,
-      builder: (context) => Consumer(
-        builder: (context, ref, _) {
-          final settings = ref.watch(localSettingsProvider);
-          final allowAdult = settings['allowAdult'] as bool? ?? false;
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          final currentSettings = ref.read(localSettingsProvider);
+          final currentAllowAdult =
+              currentSettings['allowAdult'] as bool? ?? false;
 
           return AlertDialog(
             title: const Text('Settings'),
@@ -99,7 +43,7 @@ class HomePage extends ConsumerWidget {
                 SwitchListTile(
                   title: const Text('Adult Content'),
                   subtitle: const Text('Show adult content in search results'),
-                  value: allowAdult,
+                  value: currentAllowAdult,
                   onChanged: (value) async {
                     if (value) {
                       final confirmed = await showDialog<bool>(
@@ -107,7 +51,7 @@ class HomePage extends ConsumerWidget {
                         builder: (context) => AlertDialog(
                           title: const Text('Enable Adult Content?'),
                           content: const Text(
-                            'This will show adult content in search results and latest releases.\n\nYou can disable this at any time.',
+                            'This will show adult content in search results. Are you sure?',
                           ),
                           actions: [
                             TextButton(
@@ -125,12 +69,14 @@ class HomePage extends ConsumerWidget {
                       if (confirmed == true) {
                         await ref
                             .read(localSettingsProvider.notifier)
-                            .updateSetting('allowAdult', true);
+                            .updateSetting('allowAdult', value);
+                        setState(() {});
                       }
                     } else {
                       await ref
                           .read(localSettingsProvider.notifier)
-                          .updateSetting('allowAdult', false);
+                          .updateSetting('allowAdult', value);
+                      setState(() {});
                     }
                   },
                 ),
@@ -151,10 +97,20 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
+    final recommendations = ref.watch(recommendationsProvider);
+    final becauseYouWatched = ref.watch(becauseYouWatchedProvider);
+    final trending = ref.watch(trendingAnimeProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('AniVerse'),
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+            tooltip: 'Menu',
+          ),
+        ),
         actions: [
           if (!kIsWeb &&
               (Platform.isLinux || Platform.isWindows || Platform.isMacOS))
@@ -182,11 +138,55 @@ class HomePage extends ConsumerWidget {
           ),
         ],
       ),
-      body: const SingleChildScrollView(
+      drawer: const AppDrawer(),
+      body: SingleChildScrollView(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ContinueWatchingSection(),
-            SizedBox(height: 24),
+            const ContinueWatchingSection(),
+            const SizedBox(height: 16),
+            recommendations.when(
+              data: (animeList) => RecommendationSection(
+                title: 'Recommended for You',
+                animeList: animeList,
+              ),
+              loading: () => const RecommendationSection(
+                title: 'Recommended for You',
+                animeList: [],
+                isLoading: true,
+              ),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            becauseYouWatched.when(
+              data: (data) {
+                final sourceAnime = data['sourceAnime'];
+                final similar = data['recommendations'] as List;
+
+                if (sourceAnime == null || similar.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+
+                return RecommendationSection(
+                  title: 'Because You Watched ${sourceAnime.title}',
+                  animeList: similar.cast(),
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            trending.when(
+              data: (animeList) => RecommendationSection(
+                title: 'Trending Now',
+                animeList: animeList,
+              ),
+              loading: () => const RecommendationSection(
+                title: 'Trending Now',
+                animeList: [],
+                isLoading: true,
+              ),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 32),
           ],
         ),
       ),
