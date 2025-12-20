@@ -463,18 +463,16 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         debugPrint('🎬 Playing offline: ${widget.offlineFilePath}');
 
         if (!kIsWeb && Platform.isLinux) {
-          debugPrint('🐧 Launching MPV for offline video on Linux');
+          debugPrint('🐧 Launching VLC for offline video on Linux');
 
           try {
-            final mpvProcess = await Process.start('mpv', [
-              '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-              '--force-window=yes',
-              '--keep-open=yes',
+            final vlcProcess = await Process.start('vlc', [
+              '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
               widget.offlineFilePath!,
             ]);
 
-            mpvProcess.exitCode.then((code) {
-              debugPrint('MPV exited with code: $code');
+            vlcProcess.exitCode.then((code) {
+              debugPrint('VLC exited with code: $code');
             });
 
             await Future.delayed(const Duration(milliseconds: 500));
@@ -485,7 +483,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             }
             return;
           } catch (e) {
-            debugPrint('Failed to launch MPV: $e');
+            debugPrint('Failed to launch VLC: $e');
           }
         }
 
@@ -512,18 +510,16 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           debugPrint('✅ Got Raiden direct URL: $directUrl');
 
           if (!kIsWeb && Platform.isLinux) {
-            debugPrint('🐧 Launching MPV for Raiden video on Linux');
+            debugPrint('🐧 Launching VLC for Raiden video on Linux');
 
             try {
-              final mpvProcess = await Process.start('mpv', [
-                '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-                '--force-window=yes',
-                '--keep-open=yes',
+              final vlcProcess = await Process.start('vlc', [
+                '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
                 directUrl,
               ]);
 
-              mpvProcess.exitCode.then((code) {
-                debugPrint('MPV exited with code: $code');
+              vlcProcess.exitCode.then((code) {
+                debugPrint('VLC exited with code: $code');
               });
 
               await Future.delayed(const Duration(milliseconds: 500));
@@ -534,7 +530,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
               }
               return;
             } catch (e) {
-              debugPrint('Failed to launch MPV: $e');
+              debugPrint('Failed to launch VLC: $e');
             }
           }
 
@@ -613,20 +609,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
       if (!kIsWeb && Platform.isLinux) {
         debugPrint(
-            '🐧 Launching MPV on Linux (media_kit has rendering issues)');
+            '🐧 Launching VLC on Linux (media_kit has rendering issues)');
 
         try {
-          final mpvProcess = await Process.start('mpv', [
-            '--http-header-fields=Referer: https://allanime.to',
-            '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-            '--force-window=yes',
-            '--keep-open=yes',
+          final vlcProcess = await Process.start('vlc', [
+            '--http-referrer=https://allanime.to',
+            '--http-user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+            '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
             videoUrl,
           ]);
 
-          mpvProcess.exitCode.then((code) {
-            debugPrint('MPV exited with code: $code');
+          vlcProcess.exitCode.then((code) {
+            debugPrint('VLC exited with code: $code');
             if (code != 0 && mounted) {
               _playNextSource();
             }
@@ -641,7 +635,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           }
           return;
         } catch (e) {
-          debugPrint('Failed to launch MPV: $e');
+          debugPrint('Failed to launch VLC: $e');
         }
       }
 
