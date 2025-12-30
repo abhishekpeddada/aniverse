@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0] - 2025-12-30
+
+### Added
+- **Resume Playback**: New popup dialog prompts to resume video from last position (Streaming & Offline).
+- **Download Recovery**: Added 'Sync' button in Downloads screen to scan and restore existing files after reinstall.
+- **Smart Metadata**: Restored downloads automatically fetch correct titles and thumbnails.
+
+### Fixed
+- **Continue Watching**: Fixed issue where completed series were hidden.
+- **Offline Playback**: Improved integration for restored files.
+
 ## [1.1.0] - 2025-12-04
 
 ### Added
