@@ -293,9 +293,13 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                           children: [
                             Consumer(
                               builder: (context, ref, _) {
-                                final isDownloaded = ref.watch(
+                                final isDownloadedById = ref.watch(
                                   isEpisodeDownloadedProvider(episode.id),
                                 );
+                                final isDownloadedByDetails = ref.watch(
+                                  downloadByAnimeAndEpisodeProvider((animeId: widget.animeId, episodeNumber: episode.number)),
+                                ) != null;
+                                final isDownloaded = isDownloadedById || isDownloadedByDetails;
 
                                 return IconButton(
                                   icon: Icon(
@@ -326,25 +330,90 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                                 );
                               },
                             ),
-                            Icon(
-                              Icons.play_arrow,
-                              color: isNextToWatch ? Colors.red : null,
+                            Consumer(
+                              builder: (context, ref, _) {
+                                // Check for downloaded file for play button
+                                final downloadedEp = ref.watch(downloadByEpisodeProvider(episode.id)) ?? 
+                                                     ref.watch(downloadByAnimeAndEpisodeProvider((animeId: widget.animeId, episodeNumber: episode.number)));
+                                final isDownloaded = downloadedEp != null;
+
+                                return IconButton(
+                                  icon: Icon(
+                                    Icons.play_arrow,
+                                    color: isNextToWatch ? Colors.red : null,
+                                  ),
+                                  onPressed: () {
+                                      // If downloaded, play offline
+                                      if (isDownloaded) {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => VideoPlayerScreen(
+                                                  episodeId: episode.id,
+                                                  animeId: widget.animeId,
+                                                  animeTitle: anime.title,
+                                                  animeImage: anime.image,
+                                                  episodeNumber: episode.number,
+                                                  isOffline: true,
+                                                  offlineFilePath: downloadedEp.filePath,
+                                                ),
+                                              ),
+                                            );
+                                      } else {
+                                        // Online playback
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => VideoPlayerScreen(
+                                              episodeId: episode.id,
+                                              animeId: widget.animeId,
+                                              animeTitle: anime.title,
+                                              animeImage: anime.image,
+                                              episodeNumber: episode.number,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                  },
+                                );
+                              },
                             ),
                           ],
                         ),
                         onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => VideoPlayerScreen(
-                                episodeId: episode.id,
-                                animeId: widget.animeId,
-                                animeTitle: anime.title,
-                                animeImage: anime.image,
-                                episodeNumber: episode.number,
-                              ),
-                            ),
-                          );
+                          // Also handle ListTile tap
+                          final downloadedEp = ref.read(downloadByEpisodeProvider(episode.id)) ?? 
+                                               ref.read(downloadByAnimeAndEpisodeProvider((animeId: widget.animeId, episodeNumber: episode.number)));
+                           
+                          if (downloadedEp != null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => VideoPlayerScreen(
+                                      episodeId: episode.id,
+                                      animeId: widget.animeId,
+                                      animeTitle: anime.title,
+                                      animeImage: anime.image,
+                                      episodeNumber: episode.number,
+                                      isOffline: true,
+                                      offlineFilePath: downloadedEp.filePath,
+                                    ),
+                                  ),
+                                );
+                          } else {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => VideoPlayerScreen(
+                                      episodeId: episode.id,
+                                      animeId: widget.animeId,
+                                      animeTitle: anime.title,
+                                      animeImage: anime.image,
+                                      episodeNumber: episode.number,
+                                    ),
+                                  ),
+                                );
+                          }
                         },
                       ),
                     );

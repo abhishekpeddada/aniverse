@@ -132,7 +132,7 @@ class StorageService {
     }
     
     // Filter for incomplete and sort
-    final result = latestPerAnime.values.where((h) => !h.isCompleted).toList();
+    final result = latestPerAnime.values.toList();
     result.sort((a, b) => b.lastWatched.compareTo(a.lastWatched));
     return result;
   }

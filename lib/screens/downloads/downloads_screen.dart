@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../providers/download_provider.dart';
 import '../../models/download_model.dart';
+import '../../models/download_model.dart';
 import '../player/video_player_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class DownloadsScreen extends ConsumerStatefulWidget {
   const DownloadsScreen({super.key});
@@ -48,6 +50,36 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
           IconButton(
             icon: const Icon(Icons.delete_sweep),
             onPressed: () => _showClearDialog(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.sync),
+            tooltip: 'Import Local Downloads',
+            onPressed: () async {
+               var status = await Permission.storage.status;
+               if (!status.isGranted) {
+                  status = await Permission.storage.request();
+               }
+               
+               var manageStatus = await Permission.manageExternalStorage.status;
+               if (!manageStatus.isGranted) {
+                  manageStatus = await Permission.manageExternalStorage.request();
+               }
+               
+               if (status.isGranted || manageStatus.isGranted) {
+                  await ref.read(downloadServiceProvider).importOrphanedDownloads();
+                  if (context.mounted) {
+                     ScaffoldMessenger.of(context).showSnackBar(
+                       const SnackBar(content: Text('Scanned for existing downloads')),
+                     );
+                  }
+               } else {
+                  if (context.mounted) {
+                     ScaffoldMessenger.of(context).showSnackBar(
+                       const SnackBar(content: Text('Storage permission required to import files')),
+                     );
+                  }
+               }
+            },
           ),
         ],
       ),
@@ -283,16 +315,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Column(
-                  children: [
-                    LinearProgressIndicator(value: download.progress),
-                    const SizedBox(height: 4),
-                    Text(
-                      download.progressPercentage,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
+                child: _buildProgressIndicator(download),
               ),
           ],
         ),
@@ -310,9 +333,20 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
           onPressed: () => downloadService.pauseDownload(download.id),
         );
       case DownloadStatus.paused:
-        return IconButton(
-          icon: const Icon(Icons.cancel),
-          onPressed: () => downloadService.cancelDownload(download.id),
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.play_arrow),
+              onPressed: () => downloadService.resumeDownload(download.id),
+              tooltip: 'Resume',
+            ),
+            IconButton(
+              icon: const Icon(Icons.cancel),
+              onPressed: () => downloadService.cancelDownload(download.id),
+              tooltip: 'Cancel',
+            ),
+          ],
         );
       case DownloadStatus.completed:
         return IconButton(
@@ -323,6 +357,11 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+             IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () => downloadService.resumeDownload(download.id),
+              tooltip: 'Retry',
+            ),
             IconButton(
               icon: const Icon(Icons.delete),
               onPressed: () => downloadService.deleteDownload(download.id),
@@ -332,6 +371,31 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  Widget _buildProgressIndicator(Download download) {
+    // efficient update using stream
+    final downloadService = ref.read(downloadServiceProvider);
+    
+    return StreamBuilder<double>(
+      stream: downloadService.getProgressStream(download.id),
+      initialData: download.progress,
+      builder: (context, snapshot) {
+        final progress = snapshot.data ?? 0.0;
+        final percentage = '${(progress * 100).toStringAsFixed(1)}%';
+        
+        return Column(
+          children: [
+            LinearProgressIndicator(value: progress),
+            const SizedBox(height: 4),
+            Text(
+              percentage,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   String _formatBytes(int bytes) {

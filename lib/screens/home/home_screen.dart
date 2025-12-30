@@ -10,6 +10,8 @@ import '../../providers/auth_provider.dart';
 import '../../providers/local_settings_provider.dart';
 import '../../providers/recommendation_provider.dart';
 import '../../widgets/app_drawer.dart';
+import '../search/search_screen.dart';
+import '../downloads/downloads_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -103,7 +105,7 @@ class HomePage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AniVerse'),
+        title: null,
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu),
@@ -112,6 +114,26 @@ class HomePage extends ConsumerWidget {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SearchScreen()),
+              );
+            },
+            tooltip: 'Search',
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const DownloadsScreen()),
+              );
+            },
+            tooltip: 'Downloads',
+          ),
           if (!kIsWeb &&
               (Platform.isLinux || Platform.isWindows || Platform.isMacOS))
             IconButton(

@@ -493,6 +493,46 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           isInitialized = true;
         });
 
+        // Resume Logic for Offline
+        final storage = ref.read(storageServiceProvider);
+        final savedHistory = storage.getEpisodeHistory(widget.animeId, widget.episodeId);
+
+        if (savedHistory != null && savedHistory.position > const Duration(seconds: 5)) {
+          if (mounted) {
+             await Future.delayed(Duration.zero);
+             bool resume = false;
+             await showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                backgroundColor: Colors.grey[900],
+                title: const Text('Resume Playback', style: TextStyle(color: Colors.white)),
+                content: Text(
+                  'Resume from ${_formatDuration(savedHistory!.position)}?',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      resume = false;
+                      Navigator.pop(context);
+                    },
+                    child: const Text('Start Over', style: TextStyle(color: Colors.redAccent)),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      resume = true;
+                      Navigator.pop(context);
+                    },
+                    child: const Text('Resume', style: TextStyle(color: Colors.blueAccent)),
+                  ),
+                ],
+              ),
+            );
+            if (resume) await player.seek(savedHistory.position);
+          }
+        }
+
         await player.play();
         return;
       }
@@ -539,6 +579,46 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           setState(() {
             isInitialized = true;
           });
+
+          // Resume Logic for Raiden
+          final storage = ref.read(storageServiceProvider);
+          final savedHistory = storage.getEpisodeHistory(widget.animeId, widget.episodeId);
+
+          if (savedHistory != null && savedHistory.position > const Duration(seconds: 5)) {
+            if (mounted) {
+               await Future.delayed(Duration.zero);
+               bool resume = false;
+               await showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  backgroundColor: Colors.grey[900],
+                  title: const Text('Resume Playback', style: TextStyle(color: Colors.white)),
+                  content: Text(
+                    'Resume from ${_formatDuration(savedHistory!.position)}?',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        resume = false;
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Start Over', style: TextStyle(color: Colors.redAccent)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        resume = true;
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Resume', style: TextStyle(color: Colors.blueAccent)),
+                    ),
+                  ],
+                ),
+              );
+              if (resume) await player.seek(savedHistory.position);
+            }
+          }
 
           await player.play();
           return;
@@ -656,20 +736,60 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       final savedHistory =
           storage.getEpisodeHistory(widget.animeId, widget.episodeId);
 
-      if (savedHistory != null && savedHistory.position > Duration.zero) {
-        await player.seek(savedHistory.position);
+      // Initialize player but don't play yet
+      setState(() {
+        isInitialized = true;
+      });
+
+      if (savedHistory != null && savedHistory.position > const Duration(seconds: 5)) {
+        // Show resume dialog
+        if (mounted) {
+           // We need to delay slightly to ensure context is valid if called immediately
+           await Future.delayed(Duration.zero);
+           
+           bool resume = false;
+           await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              backgroundColor: Colors.grey[900],
+              title: const Text('Resume Playback', style: TextStyle(color: Colors.white)),
+              content: Text(
+                'Resume from ${_formatDuration(savedHistory!.position)}?',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    resume = false;
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Start Over', style: TextStyle(color: Colors.redAccent)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    resume = true;
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Resume', style: TextStyle(color: Colors.blueAccent)),
+                ),
+              ],
+            ),
+          );
+
+          if (resume) {
+            await player.seek(savedHistory.position);
+          }
+        }
       }
 
       await player.play();
 
-      // Sync history immediately when playback starts (without position)
+      // Sync history immediately when playback starts
       _saveWatchHistory(
-          savedHistory?.position ?? Duration.zero, player.state.duration,
+          player.state.position, player.state.duration,
           syncToCloud: true);
 
-      setState(() {
-        isInitialized = true;
-      });
     } catch (e) {
       debugPrint('❌ Error playing source $_currentSourceIndex: $e');
       _playNextSource();
