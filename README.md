@@ -12,6 +12,23 @@ A cross-platform anime streaming application built with Flutter. Streams anime c
 - Google Sign-In for cloud sync
 - Cross-platform support (Android, iOS, Web, Linux, Windows)
 
+## Screenshots
+<p align="center">
+  <img src="assets/images/photo_1_2025-12-30_20-41-49.jpg" width="30%" />
+  <img src="assets/images/photo_2_2025-12-30_20-41-49.jpg" width="30%" />
+  <img src="assets/images/photo_3_2025-12-30_20-41-49.jpg" width="30%" />
+</p>
+<p align="center">
+  <img src="assets/images/photo_4_2025-12-30_20-41-49.jpg" width="30%" />
+  <img src="assets/images/photo_5_2025-12-30_20-41-49.jpg" width="30%" />
+  <img src="assets/images/photo_6_2025-12-30_20-41-49.jpg" width="30%" />
+</p>
+<p align="center">
+  <img src="assets/images/photo_7_2025-12-30_20-41-49.jpg" width="30%" />
+  <img src="assets/images/photo_8_2025-12-30_20-41-49.jpg" width="30%" />
+  <img src="assets/images/photo_9_2025-12-30_20-41-49.jpg" width="30%" />
+</p>
+
 ## Technical Details
 
 ### Video Playback
@@ -71,4 +88,8 @@ flutter build apk --release
 - Linux builds use external mpv player
 
 ## License
+
+> [!NOTE]
+> **Built with AI Assistance**
+> This application was developed using AI Agents. While functional and rich in features, code structure and logic are the result of AI-human collaboration.
 This project is for educational purposes only.
