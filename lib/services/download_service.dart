@@ -19,6 +19,7 @@ class DownloadService {
   final Map<String, CancelToken> _cancelTokens = {};
   final Map<String, StreamController<double>> _progressControllers = {};
   final Set<String> _processingIds = {};
+  final Set<String> _processingEpisodes = {}; // Track episodes being processed to prevent duplicates
   bool _isForegroundServiceRunning = false;
 
   DownloadService({
@@ -89,6 +90,19 @@ class DownloadService {
            final animeId = match.group(1)!;
            final epNum = int.tryParse(match.group(2)!) ?? 1;
            final quality = match.group(3)!;
+           
+           // Skip if this episode is currently being downloaded (to avoid creating duplicates)
+           final episodeKey = '${animeId}_ep$epNum';
+           if (_processingEpisodes.contains(episodeKey)) {
+             debugPrint('Skipping import of $filename - episode is currently being downloaded');
+             continue;
+           }
+           
+           // Also check if there's already a download for this anime+episode (any status)
+           if (existingDownloads.any((d) => d.animeId == animeId && d.episodeNumber == epNum)) {
+             debugPrint('Skipping import of $filename - download record already exists for episode');
+             continue;
+           }
            
            // We can't recover the exact Episode ID from filename, so we generate a consistent one
            // But we DO have the real Anime ID and Episode Number, which allows us to match in UI.
@@ -298,36 +312,85 @@ class DownloadService {
     required String quality,
   }) async {
     final downloadId = '${episodeId}_$quality';
+    final episodeKey = '${animeId}_ep$episodeNumber'; // Unique key for episode regardless of episodeId
 
     // Check storage permission first
     final hasPermission = await _requestStoragePermission();
     if (!hasPermission) {
       throw Exception('Storage permission denied. Please grant storage access to download episodes.');
     }
+    
+    // Note: importOrphanedDownloads is called in constructor, not here
+    // Calling it during active downloads can cause race conditions
 
-    // Attempt to restore any orphaned downloads now that we have permission
-    importOrphanedDownloads();
-
-    if (_processingIds.contains(downloadId)) return _storage.getDownload(downloadId) ?? 
-        Download(
-          id: downloadId,
-          animeId: animeId,
-          animeTitle: animeTitle,
-          episodeId: episodeId,
-          episodeNumber: episodeNumber,
-          downloadUrl: downloadUrl,
-          quality: quality,
-          status: DownloadStatus.downloading,
-          createdAt: DateTime.now(),
-        ); // Return dummy or existing if locked
+    // Check if this exact download ID is being processed
+    if (_processingIds.contains(downloadId)) {
+      return _storage.getDownload(downloadId) ?? 
+          Download(
+            id: downloadId,
+            animeId: animeId,
+            animeTitle: animeTitle,
+            episodeId: episodeId,
+            episodeNumber: episodeNumber,
+            downloadUrl: downloadUrl,
+            quality: quality,
+            status: DownloadStatus.downloading,
+            createdAt: DateTime.now(),
+          ); // Return dummy or existing if locked
+    }
+    
+    // Check if this episode (by animeId + episodeNumber) is already being processed
+    // This prevents race conditions when downloading the same episode with different parameters
+    if (_processingEpisodes.contains(episodeKey)) {
+      debugPrint('Episode $episodeKey is already being processed, skipping duplicate download');
+      // Return existing download if any, or a placeholder
+      final allDownloads = _storage.getAllDownloads();
+      final existingForEpisode = allDownloads.where((d) => 
+          d.animeId == animeId && d.episodeNumber == episodeNumber
+      ).toList();
+      if (existingForEpisode.isNotEmpty) {
+        return existingForEpisode.first;
+      }
+      // Return a placeholder download
+      return Download(
+        id: downloadId,
+        animeId: animeId,
+        animeTitle: animeTitle,
+        episodeId: episodeId,
+        episodeNumber: episodeNumber,
+        downloadUrl: downloadUrl,
+        quality: quality,
+        status: DownloadStatus.downloading,
+        createdAt: DateTime.now(),
+      );
+    }
             
     _processingIds.add(downloadId);
+    _processingEpisodes.add(episodeKey);
 
     try {
+      // Check if download with this exact ID already exists and is completed
       final existingDownload = _storage.getDownload(downloadId);
       if (existingDownload != null &&
           existingDownload.status == DownloadStatus.completed) {
         return existingDownload;
+      }
+
+      // Delete any existing COMPLETED downloads for the same episode (by animeId + episodeNumber)
+      // This prevents duplicate entries in the completed downloads list
+      // Uses animeId + episodeNumber which is more reliable than episodeId alone
+      // IMPORTANT: Only delete COMPLETED downloads - don't touch downloading/paused/failed ones
+      final allDownloads = _storage.getAllDownloads();
+      final existingCompletedDownloads = allDownloads.where((d) => 
+          d.animeId == animeId && 
+          d.episodeNumber == episodeNumber &&
+          d.id != downloadId &&
+          d.status == DownloadStatus.completed // Only delete completed ones!
+      ).toList();
+      
+      for (final oldDownload in existingCompletedDownloads) {
+        debugPrint('Removing old completed download ${oldDownload.id} for episode $episodeKey');
+        await deleteDownload(oldDownload.id);
       }
 
       final download = Download(
@@ -445,6 +508,7 @@ class DownloadService {
       }
     } finally {
       _processingIds.remove(downloadId);
+      _processingEpisodes.remove(episodeKey);
     }
   }
 
@@ -468,7 +532,16 @@ class DownloadService {
       final file = File(filePath);
       
       int existingBytes = 0;
-      if (await file.exists()) {
+      
+      // For failed downloads, delete the existing file and start fresh
+      // to avoid appending to corrupted data
+      if (download.status == DownloadStatus.failed) {
+        if (await file.exists()) {
+          debugPrint('Deleting corrupted file for failed download: $filePath');
+          await file.delete();
+        }
+        existingBytes = 0;
+      } else if (await file.exists()) {
         existingBytes = await file.length();
       }
 
@@ -485,20 +558,27 @@ class DownloadService {
       try {
         await _startForegroundService();
         
+        // Build headers - only include Range if resuming a partial download
+        final headers = {
+          'Referer': 'https://allanime.to',
+          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        };
+        
+        if (existingBytes > 0) {
+          headers['Range'] = 'bytes=$existingBytes-';
+        }
+        
         final response = await _dio.get(
           download.downloadUrl,
           options: Options(
             responseType: ResponseType.stream,
-            headers: {
-              'Range': 'bytes=$existingBytes-',
-              'Referer': 'https://allanime.to',
-              'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            },
+            headers: headers,
           ),
           cancelToken: cancelToken,
         );
 
-        final raf = await file.open(mode: FileMode.append);
+        // Use write mode if starting fresh, append if resuming
+        final raf = await file.open(mode: existingBytes > 0 ? FileMode.append : FileMode.write);
         
         int receivedBytes = 0;
         int totalBytes = existingBytes + (int.parse(response.headers.value('content-length') ?? '0'));
