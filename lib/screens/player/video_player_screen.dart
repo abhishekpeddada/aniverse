@@ -93,6 +93,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   Timer? _historySaveTimer;
 
+  // Buffering state
+  bool _isBuffering = false;
+
   void _resetHideTimer() {
     _hideControlsTimer?.cancel();
     setState(() {
@@ -250,6 +253,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     player = Player(
       configuration: const PlayerConfiguration(
         title: 'AniVerse Player',
+        bufferSize: 64 * 1024 * 1024, // 64MB buffer for smoother streaming
       ),
     );
     controller = VideoController(player);
@@ -829,6 +833,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       }
     });
 
+    // Track buffering state for loading indicator
+    player.stream.buffering.listen((isBuffering) {
+      if (mounted) {
+        setState(() {
+          _isBuffering = isBuffering;
+        });
+      }
+    });
+
     player.stream.error.listen((error) {
       debugPrint('❌ Player error: $error');
 
@@ -839,23 +852,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         return;
       }
 
-      // If we HAVE played successfully, this is likely a network/seek error.
-      // Do NOT switch source automatically. Just notify user and try to resume.
-      debugPrint('⚠️ Error during playback/seek. Retrying...');
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Buffering error. Waiting...'),
-          duration: const Duration(seconds: 3),
-          action: SnackBarAction(
-            label: 'Next Source',
-            onPressed: _playNextSource,
-            textColor: Colors.yellow,
-          ),
-        ),
-      );
-
-      // Attempt to resume after a short delay
+      // Silently retry - buffering indicator will show automatically
+      debugPrint('⚠️ Error during playback, retrying...');
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted && !player.state.playing) {
           player.play();
@@ -1172,6 +1170,21 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                                   fontWeight: FontWeight.bold),
                             ),
                           ],
+                        ),
+                      ),
+                    ),
+
+                  // Buffering overlay (shows loading indicator when buffering)
+                  if (_isBuffering)
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const CircularProgressIndicator(
+                          color: Colors.white,
                         ),
                       ),
                     ),
