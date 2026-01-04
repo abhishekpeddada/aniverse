@@ -96,6 +96,30 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   // Buffering state
   bool _isBuffering = false;
 
+  Future<void> _saveVlcWatchHistory({int positionMs = 0, int durationMs = 0}) async {
+    final effectiveDuration = durationMs > 0 ? durationMs : 24 * 60 * 1000;
+    
+    final history = WatchHistory(
+      animeId: widget.animeId,
+      episodeId: widget.episodeId,
+      animeTitle: widget.animeTitle,
+      animeImage: widget.animeImage,
+      episodeNumber: widget.episodeNumber,
+      positionMs: positionMs,
+      durationMs: effectiveDuration,
+      lastWatched: DateTime.now(),
+    );
+
+    try {
+      await ref
+          .read(historyProvider.notifier)
+          .saveHistory(history, syncToCloud: true);
+      debugPrint('📝 VLC watch history saved: pos=$positionMs, dur=$effectiveDuration');
+    } catch (e) {
+      debugPrint('Failed to save VLC watch history: $e');
+    }
+  }
+
   void _resetHideTimer() {
     _hideControlsTimer?.cancel();
     setState(() {
@@ -470,13 +494,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           debugPrint('🐧 Launching VLC for offline video on Linux');
 
           try {
+            await _saveVlcWatchHistory(positionMs: 0);
+
             final vlcProcess = await Process.start('vlc', [
               '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
               widget.offlineFilePath!,
             ]);
 
-            vlcProcess.exitCode.then((code) {
+            vlcProcess.exitCode.then((code) async {
               debugPrint('VLC exited with code: $code');
+              if (code == 0) {
+                await _saveVlcWatchHistory(positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+              }
             });
 
             await Future.delayed(const Duration(milliseconds: 500));
@@ -557,13 +586,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             debugPrint('🐧 Launching VLC for Raiden video on Linux');
 
             try {
+              await _saveVlcWatchHistory(positionMs: 0);
+
               final vlcProcess = await Process.start('vlc', [
                 '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
                 directUrl,
               ]);
 
-              vlcProcess.exitCode.then((code) {
+              vlcProcess.exitCode.then((code) async {
                 debugPrint('VLC exited with code: $code');
+                if (code == 0) {
+                  await _saveVlcWatchHistory(positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+                }
               });
 
               await Future.delayed(const Duration(milliseconds: 500));
@@ -696,6 +730,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             '🐧 Launching VLC on Linux (media_kit has rendering issues)');
 
         try {
+          await _saveVlcWatchHistory(positionMs: 0);
+
           final vlcProcess = await Process.start('vlc', [
             '--http-referrer=https://allanime.to',
             '--http-user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
@@ -703,9 +739,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             videoUrl,
           ]);
 
-          vlcProcess.exitCode.then((code) {
+          vlcProcess.exitCode.then((code) async {
             debugPrint('VLC exited with code: $code');
-            if (code != 0 && mounted) {
+            if (code == 0) {
+              await _saveVlcWatchHistory(positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+            } else if (mounted) {
               _playNextSource();
             }
           });
