@@ -281,8 +281,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       ),
     );
     controller = VideoController(player);
+    
+    // Defer initialization to allow context to be ready for dialogs
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializePlayer();
+    });
 
-    _initializePlayer();
     _setupPositionListener();
     _initSystemControls();
 
@@ -491,22 +495,49 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         debugPrint('🎬 Playing offline: ${widget.offlineFilePath}');
 
         if (!kIsWeb && Platform.isLinux) {
-          debugPrint('🐧 Launching VLC for offline video on Linux');
+          final externalPlayer = await _showExternalPlayerDialog();
+
+          if (externalPlayer == null) {
+            debugPrint('🐧 User cancelled external player selection for offline video');
+             if (mounted) Navigator.of(context).pop();
+            return;
+          }
+
+          debugPrint('🐧 Launching $externalPlayer for offline video on Linux');
 
           try {
-            await _saveVlcWatchHistory(positionMs: 0);
+            if (externalPlayer == 'vlc') {
+              await _saveVlcWatchHistory(positionMs: 0);
 
-            final vlcProcess = await Process.start('vlc', [
-              '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-              widget.offlineFilePath!,
-            ]);
+              final vlcProcess = await Process.start('vlc', [
+                '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+                widget.offlineFilePath!,
+              ]);
 
-            vlcProcess.exitCode.then((code) async {
-              debugPrint('VLC exited with code: $code');
-              if (code == 0) {
-                await _saveVlcWatchHistory(positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-              }
-            });
+              vlcProcess.exitCode.then((code) async {
+                debugPrint('VLC exited with code: $code');
+                if (code == 0) {
+                  await _saveVlcWatchHistory(
+                      positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+                }
+              });
+            } else if (externalPlayer == 'mpv') {
+              // MPV Logic
+              await _saveVlcWatchHistory(positionMs: 0); // Reuse history logic for now
+
+              final mpvProcess = await Process.start('mpv', [
+                '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+                widget.offlineFilePath!,
+              ]);
+
+              mpvProcess.exitCode.then((code) async {
+                 debugPrint('MPV exited with code: $code');
+                 if (code == 0) {
+                   await _saveVlcWatchHistory(
+                      positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+                 }
+              });
+            }
 
             await Future.delayed(const Duration(milliseconds: 500));
             _hasPlayedSuccessfully = true;
@@ -516,9 +547,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             }
             return;
           } catch (e) {
-            debugPrint('Failed to launch VLC: $e');
+            debugPrint('Failed to launch external player: $e');
           }
         }
+
+
+
 
         await player.open(Media(widget.offlineFilePath!));
 
@@ -583,32 +617,50 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           debugPrint('✅ Got Raiden direct URL: $directUrl');
 
           if (!kIsWeb && Platform.isLinux) {
-            debugPrint('🐧 Launching VLC for Raiden video on Linux');
+            
+            final externalPlayer = await _showExternalPlayerDialog();
+            if (externalPlayer == null) {
+              debugPrint('🐧 User cancelled external player selection');
+              Navigator.of(context).pop();
+              return;
+            }
+
+            debugPrint('🐧 Launching $externalPlayer for Raiden video on Linux');
 
             try {
-              await _saveVlcWatchHistory(positionMs: 0);
+              if (externalPlayer == 'vlc') {
+                await _saveVlcWatchHistory(positionMs: 0);
 
-              final vlcProcess = await Process.start('vlc', [
-                '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-                directUrl,
-              ]);
+                final vlcProcess = await Process.start('vlc', [
+                  '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+                  directUrl,
+                ]);
 
-              vlcProcess.exitCode.then((code) async {
-                debugPrint('VLC exited with code: $code');
-                if (code == 0) {
-                  await _saveVlcWatchHistory(positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-                }
-              });
+                vlcProcess.exitCode.then((code) async {
+                  debugPrint('VLC exited with code: $code');
+                  if (code == 0) {
+                    await _saveVlcWatchHistory(
+                        positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+                  }
+                });
+              } else if (externalPlayer == 'mpv') {
+                await _saveVlcWatchHistory(positionMs: 0);
 
-              await Future.delayed(const Duration(milliseconds: 500));
-              _hasPlayedSuccessfully = true;
+                final mpvProcess = await Process.start('mpv', [
+                  '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+                  directUrl,
+                ]);
 
-              if (mounted) {
-                Navigator.of(context).pop();
+                mpvProcess.exitCode.then((code) async {
+                  debugPrint('MPV exited with code: $code');
+                  if (code == 0) {
+                    await _saveVlcWatchHistory(
+                        positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+                  }
+                });
               }
-              return;
             } catch (e) {
-              debugPrint('Failed to launch VLC: $e');
+              debugPrint('Failed to launch external player: $e');
             }
           }
 
@@ -726,38 +778,66 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       });
 
       if (!kIsWeb && Platform.isLinux) {
+        final externalPlayer = await _showExternalPlayerDialog();
+        if (externalPlayer == null) {
+          debugPrint('🐧 User cancelled external player selection');
+          // If cancelling player selection, we probably shouldn't just fallback to internal player 
+          // if the intent was to watch externally. But for now, returning stops the flow.
+          // Or we could let it fall through to internal player? 
+          // Let's assume on Linux if we are here we want external.
+          // But wait, the original logic fell through to media_kit if not linux.
+          // If we return here, we stop playback. The user can just play again if they want.
+           setState(() {
+            isInitialized = true; // Stop loading
+          });
+          return;
+        }
+
         debugPrint(
-            '🐧 Launching VLC on Linux (media_kit has rendering issues)');
+            '🐧 Launching $externalPlayer on Linux (media_kit has rendering issues)');
 
         try {
-          await _saveVlcWatchHistory(positionMs: 0);
+          if (externalPlayer == 'vlc') {
+            await _saveVlcWatchHistory(positionMs: 0);
 
-          final vlcProcess = await Process.start('vlc', [
-            '--http-referrer=https://allanime.to',
-            '--http-user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-            videoUrl,
-          ]);
+            final vlcProcess = await Process.start('vlc', [
+              '--http-referrer=https://allanime.to',
+              '--http-user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+              videoUrl,
+            ]);
 
-          vlcProcess.exitCode.then((code) async {
-            debugPrint('VLC exited with code: $code');
-            if (code == 0) {
-              await _saveVlcWatchHistory(positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-            } else if (mounted) {
-              _playNextSource();
-            }
-          });
+            vlcProcess.exitCode.then((code) async {
+              debugPrint('VLC exited with code: $code');
+              if (code == 0) {
+                await _saveVlcWatchHistory(
+                    positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+              } else if (mounted) {
+                _playNextSource();
+              }
+            });
+          } else if (externalPlayer == 'mpv') {
+             await _saveVlcWatchHistory(positionMs: 0);
 
-          await Future.delayed(const Duration(milliseconds: 500));
+            final mpvProcess = await Process.start('mpv', [
+              '--referrer=https://allanime.to',
+              '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
+              videoUrl,
+            ]);
 
-          _hasPlayedSuccessfully = true;
-
-          if (mounted) {
-            Navigator.of(context).pop();
+            mpvProcess.exitCode.then((code) async {
+              debugPrint('MPV exited with code: $code');
+              if (code == 0) {
+                await _saveVlcWatchHistory(
+                    positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
+              } else if (mounted) {
+                _playNextSource();
+              }
+            });
           }
-          return;
         } catch (e) {
-          debugPrint('Failed to launch VLC: $e');
+          debugPrint('Failed to launch external player: $e');
         }
       }
 
@@ -1582,6 +1662,36 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                 ),
               ),
       ),
+    );
+  }
+
+  Future<String?> _showExternalPlayerDialog() async {
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('Select Video Player',
+              style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.video_library, color: Colors.orange),
+                title: const Text('VLC Media Player',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(context, 'vlc'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.play_circle_outline, color: Colors.purple),
+                title: const Text('MPV Player',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(context, 'mpv'),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
