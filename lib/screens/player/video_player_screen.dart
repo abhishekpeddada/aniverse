@@ -1278,51 +1278,6 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                                                         TextOverflow.ellipsis,
                                                   ),
                                                 ),
-                                                IconButton(
-                                                  icon: Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.black45,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              4),
-                                                    ),
-                                                    child: Text(
-                                                      _translationType
-                                                          .toUpperCase(),
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 12,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  onPressed: () {
-                                                    _resetHideTimer();
-                                                    _toggleTranslationType();
-                                                  },
-                                                ),
-                                                if (_availableSources.length >
-                                                    1)
-                                                  IconButton(
-                                                    icon: const Icon(Icons.hd,
-                                                        color: Colors.white),
-                                                    onPressed: () {
-                                                      QualitySelector.show(
-                                                        context: context,
-                                                        sources:
-                                                            _availableSources,
-                                                        currentIndex:
-                                                            _currentSourceIndex,
-                                                        onQualitySelected:
-                                                            _switchSource,
-                                                      );
-                                                    },
-                                                  ),
                                               ],
                                             ),
                                           ),
@@ -1444,6 +1399,54 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                                                       MainAxisAlignment
                                                           .spaceEvenly,
                                                   children: [
+                                                    // Sub/Dub toggle button
+                                                    IconButton(
+                                                      icon: Container(
+                                                        padding: const EdgeInsets
+                                                            .symmetric(
+                                                            horizontal: 6,
+                                                            vertical: 2),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.black45,
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                  3),
+                                                        ),
+                                                        child: Text(
+                                                          _translationType
+                                                              .toUpperCase(),
+                                                          style: const TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      onPressed: () {
+                                                        _resetHideTimer();
+                                                        _toggleTranslationType();
+                                                      },
+                                                    ),
+                                                    // Quality selector
+                                                    if (_availableSources.length >
+                                                        1)
+                                                      IconButton(
+                                                        icon: const Icon(Icons.hd,
+                                                            color: Colors.white,
+                                                            size: 20),
+                                                        onPressed: () {
+                                                          QualitySelector.show(
+                                                            context: context,
+                                                            sources:
+                                                                _availableSources,
+                                                            currentIndex:
+                                                                _currentSourceIndex,
+                                                            onQualitySelected:
+                                                                _switchSource,
+                                                          );
+                                                        },
+                                                      ),
                                                     IconButton(
                                                       icon: Icon(
                                                         _autoRotateEnabled
