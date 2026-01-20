@@ -604,125 +604,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         return;
       }
 
-      // Check if this is a Raiden source (episodeId starts with raiden_)
-      if (widget.episodeId.startsWith('raiden_')) {
-        debugPrint('🎬 Playing Raiden content: ${widget.episodeId}');
-
-        // Get the Raiden data from cache
-        final raidenData =
-            ref.read(raidenAnimeDetailsProvider(widget.episodeId));
-
-        if (raidenData != null && raidenData['download_url'] != null) {
-          final directUrl = raidenData['download_url'] as String;
-          debugPrint('✅ Got Raiden direct URL: $directUrl');
-
-          if (!kIsWeb && Platform.isLinux) {
-            
-            final externalPlayer = await _showExternalPlayerDialog();
-            if (externalPlayer == null) {
-              debugPrint('🐧 User cancelled external player selection');
-              Navigator.of(context).pop();
-              return;
-            }
-
-            debugPrint('🐧 Launching $externalPlayer for Raiden video on Linux');
-
-            try {
-              if (externalPlayer == 'vlc') {
-                await _saveVlcWatchHistory(positionMs: 0);
-
-                final vlcProcess = await Process.start('vlc', [
-                  '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-                  directUrl,
-                ]);
-
-                vlcProcess.exitCode.then((code) async {
-                  debugPrint('VLC exited with code: $code');
-                  if (code == 0) {
-                    await _saveVlcWatchHistory(
-                        positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-                  }
-                });
-              } else if (externalPlayer == 'mpv') {
-                await _saveVlcWatchHistory(positionMs: 0);
-
-                final mpvProcess = await Process.start('mpv', [
-                  '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-                  directUrl,
-                ]);
-
-                mpvProcess.exitCode.then((code) async {
-                  debugPrint('MPV exited with code: $code');
-                  if (code == 0) {
-                    await _saveVlcWatchHistory(
-                        positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-                  }
-                });
-              }
-            } catch (e) {
-              debugPrint('Failed to launch external player: $e');
-            }
-          }
-
-          await player.open(Media(directUrl));
-
-          setState(() {
-            isInitialized = true;
-          });
-
-          // Resume Logic for Raiden
-          final storage = ref.read(storageServiceProvider);
-          final savedHistory = storage.getEpisodeHistory(widget.animeId, widget.episodeId);
-
-          if (savedHistory != null && savedHistory.position > const Duration(seconds: 5)) {
-            if (mounted) {
-               await Future.delayed(Duration.zero);
-               bool resume = false;
-               await showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (context) => AlertDialog(
-                  backgroundColor: Colors.grey[900],
-                  title: const Text('Resume Playback', style: TextStyle(color: Colors.white)),
-                  content: Text(
-                    'Resume from ${_formatDuration(savedHistory!.position)}?',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () {
-                        resume = false;
-                        Navigator.pop(context);
-                      },
-                      child: const Text('Start Over', style: TextStyle(color: Colors.redAccent)),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        resume = true;
-                        Navigator.pop(context);
-                      },
-                      child: const Text('Resume', style: TextStyle(color: Colors.blueAccent)),
-                    ),
-                  ],
-                ),
-              );
-              if (resume) await player.seek(savedHistory.position);
-            }
-          }
-
-          await player.play();
-          return;
-        } else {
-          debugPrint('❌ No Raiden data found in cache');
-          setState(() {
-            hasError = true;
-            errorMessage = 'Raiden content not found in cache';
-          });
-          return;
-        }
-      }
-
-      // Original AllAnime logic
+      // Standardize Raiden to use the same provider pipeline
       debugPrint(
           '🎬 Fetching video sources for: ${widget.episodeId} (type: $_translationType)');
 
@@ -836,6 +718,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
               }
             });
           }
+          
+          // Exit early - external player is handling playback
+          await Future.delayed(const Duration(milliseconds: 500));
+          _hasPlayedSuccessfully = true;
+          
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+          return;
         } catch (e) {
           debugPrint('Failed to launch external player: $e');
         }

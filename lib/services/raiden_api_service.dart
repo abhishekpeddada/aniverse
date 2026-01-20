@@ -23,16 +23,39 @@ class RaidenApiService {
         if (results != null && results.isNotEmpty) {
           debugPrint('✅ Fetched ${results.length} adult anime from Raiden');
           
-          // Apply domain fix to all download URLs
-          return results.map((item) {
+          final List<Map<String, dynamic>> processedResults = [];
+          
+          for (var item in results) {
             final anime = item as Map<String, dynamic>;
-            // Fix domain from .city to .fit
-            if (anime['download_url'] != null) {
-              anime['download_url'] = (anime['download_url'] as String)
-                  .replaceAll('hanime.city', 'hanime.fit');
+            final pageUrl = anime['page_url'] as String?;
+            
+            if (pageUrl != null) {
+              try {
+                final videoUrl = await _scrapeVideoUrl(pageUrl);
+                if (videoUrl != null) {
+                  anime['download_url'] = videoUrl;
+                  processedResults.add(anime);
+                  debugPrint('✅ Scraped URL from $pageUrl');
+                } else {
+                  debugPrint('⚠️ Failed to scrape URL from $pageUrl');
+                  if (anime['download_url'] != null) {
+                    anime['download_url'] = (anime['download_url'] as String)
+                        .replaceAll('hanime.city', 'rule34.city');
+                    processedResults.add(anime);
+                  }
+                }
+              } catch (e) {
+                debugPrint('⚠️ Error scraping $pageUrl: $e');
+                if (anime['download_url'] != null) {
+                  anime['download_url'] = (anime['download_url'] as String)
+                      .replaceAll('hanime.city', 'rule34.city');
+                  processedResults.add(anime);
+                }
+              }
             }
-            return anime;
-          }).toList();
+          }
+          
+          return processedResults;
         }
       }
       
@@ -72,11 +95,51 @@ class RaidenApiService {
   /// Get video source URL with domain fix applied
   /// This ensures the URL uses the correct domain (.fit instead of .city)
   String getVideoSource(String downloadUrl) {
-    return downloadUrl.replaceAll('hanime.city', 'hanime.fit');
+    return downloadUrl.replaceAll('hanime.city', 'rule34.city');
   }
 
   /// Check if a URL is from Raiden API
   bool isRaidenSource(String url) {
-    return url.contains('hanime.fit') || url.contains('hanimes.org');
+    return url.contains('hanime.fit') || 
+           url.contains('hanimes.org') || 
+           url.contains('rule34.city') || 
+           url.contains('rule34video.city');
+  }
+
+  Future<String?> _scrapeVideoUrl(String pageUrl) async {
+    try {
+      debugPrint('🕷️ Scraping video URL from: $pageUrl');
+      
+      final response = await _dio.get(pageUrl);
+      
+      if (response.statusCode == 200 && response.data != null) {
+        final html = response.data as String;
+        
+        final sourceRegex = RegExp(r'<source\s+src="([^"]+)"', caseSensitive: false);
+        final match = sourceRegex.firstMatch(html);
+        
+        if (match != null && match.groupCount >= 1) {
+          final videoUrl = match.group(1);
+          debugPrint('✅ Found video URL: $videoUrl');
+          return videoUrl;
+        }
+        
+        final downloadRegex = RegExp(r"window\.open\('([^']+)'", caseSensitive: false);
+        final downloadMatch = downloadRegex.firstMatch(html);
+        
+        if (downloadMatch != null && downloadMatch.groupCount >= 1) {
+          final videoUrl = downloadMatch.group(1);
+          debugPrint('✅ Found video URL from download button: $videoUrl');
+          return videoUrl;
+        }
+        
+        debugPrint('⚠️ No video URL pattern found in page HTML');
+      }
+      
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error scraping video URL: $e');
+      return null;
+    }
   }
 }

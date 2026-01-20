@@ -7,6 +7,7 @@ class StorageService {
   static const String _favoritesBox = 'favorites';
   static const String _historyBox = 'history';
   static const String _animeBox = 'anime_cache';
+  static const String _raidenDataBox = 'raiden_data'; // NEW: Persistent Raiden cache
 
   // Initialize Hive
   static Future<void> init() async {
@@ -21,6 +22,7 @@ class StorageService {
     await Hive.openBox<String>(_favoritesBox);
     await Hive.openBox<WatchHistory>(_historyBox);
     await Hive.openBox<Anime>(_animeBox);
+    await Hive.openBox<Map>(_raidenDataBox); // NEW
   }
 
   // Watchlist operations
@@ -176,6 +178,24 @@ class StorageService {
   // Clear anime cache (useful for schema migrations)
   static Future<void> clearAnimeCache() async {
     final box = Hive.box<Anime>(_animeBox);
+    await box.clear();
+  }
+
+  // NEW: Raiden data cache operations
+  Future<void> cacheRaidenData(String animeId, Map<String, dynamic> data) async {
+    final box = Hive.box<Map>(_raidenDataBox);
+    await box.put(animeId, data);
+  }
+
+  Map<String, dynamic>? getRaidenData(String animeId) {
+    final box = Hive.box<Map>(_raidenDataBox);
+    final data = box.get(animeId);
+    if (data == null) return null;
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<void> clearRaidenCache() async {
+    final box = Hive.box<Map>(_raidenDataBox);
     await box.clear();
   }
 }
