@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.0] - 2026-04-10
+
+### Fixed
+- Switch AllAnime API requests from GET to POST to bypass Cloudflare blocking
+
 ## [1.2.0] - 2025-12-30
 
 ### Added
