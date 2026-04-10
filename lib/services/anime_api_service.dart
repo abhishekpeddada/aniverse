@@ -10,10 +10,13 @@ class AnimeApiService {
     baseUrl: ApiConstants.baseUrl,
     connectTimeout: const Duration(seconds: 30),
     receiveTimeout: const Duration(seconds: 30),
-    headers: kIsWeb ? {} : {
-      'Referer': ApiConstants.referer,
-      'User-Agent': ApiConstants.userAgent,
-    },
+    headers: kIsWeb
+        ? {'Content-Type': 'application/json'}
+        : {
+            'Content-Type': 'application/json',
+            'Referer': ApiConstants.referer,
+            'User-Agent': ApiConstants.userAgent,
+          },
   ));
 
   AnimeApiService() {
@@ -29,7 +32,7 @@ class AnimeApiService {
   Future<List<Anime>> searchAnime(String query, {bool allowAdult = false}) async {
     try {
       debugPrint('🔍 Searching anime: $query (adult: $allowAdult)');
-      
+
       const searchQuery = r'''
         query($search: SearchInput) {
           shows(search: $search, limit: 40, page: 1) {
@@ -53,10 +56,10 @@ class AnimeApiService {
         },
       };
 
-      final response = await _dio.get(
+      final response = await _dio.post(
         ApiConstants.apiPath,
-        queryParameters: {
-          'variables': jsonEncode(variables),
+        data: {
+          'variables': variables,
           'query': searchQuery,
         },
       );
@@ -66,7 +69,7 @@ class AnimeApiService {
       if (response.data != null && response.data['data'] != null) {
         final shows = response.data['data']['shows']['edges'] as List;
         debugPrint('✅ Found ${shows.length} results');
-        
+
         return shows.map((show) {
           return Anime.fromJson({
             'id': show['_id'],
@@ -118,10 +121,10 @@ class AnimeApiService {
 
       final variables = {'showId': animeId};
 
-      final response = await _dio.get(
+      final response = await _dio.post(
         ApiConstants.apiPath,
-        queryParameters: {
-          'variables': jsonEncode(variables),
+        data: {
+          'variables': variables,
           'query': episodesQuery,
         },
       );
@@ -130,7 +133,7 @@ class AnimeApiService {
 
       if (response.data != null && response.data['data'] != null) {
         final show = response.data['data']['show'];
-        
+
         final anime = Anime.fromJson({
           'id': show['_id'],
           'title': show['name'],
@@ -157,7 +160,7 @@ class AnimeApiService {
         }
 
         episodesList.sort((a, b) => a.number.compareTo(b.number));
-        
+
         debugPrint('✅ Found ${episodesList.length} episodes');
 
         return {
@@ -182,7 +185,7 @@ class AnimeApiService {
 
       final parts = episodeId.split('-');
       if (parts.length < 2) return null;
-      
+
       final showId = parts[0];
       final episodeString = parts.sublist(1).join('-');
 
@@ -201,10 +204,10 @@ class AnimeApiService {
         'episodeString': episodeString,
       };
 
-      final response = await _dio.get(
+      final response = await _dio.post(
         ApiConstants.apiPath,
-        queryParameters: {
-          'variables': jsonEncode(variables),
+        data: {
+          'variables': variables,
           'query': sourceQuery,
         },
       );
@@ -214,16 +217,16 @@ class AnimeApiService {
       if (response.data != null && response.data['data'] != null) {
         final episode = response.data['data']['episode'];
         final sourceUrls = episode['sourceUrls'] as List?;
-        
+
         if (sourceUrls != null && sourceUrls.isNotEmpty) {
           final sources = <Map<String, dynamic>>[];
-          
+
           for (var source in sourceUrls) {
             final sourceUrl = source['sourceUrl'] as String?;
             final sourceName = source['sourceName'] as String?;
             final sourceType = source['type'] as String?;
             final priority = source['priority'] as num?;
-            
+
             if (sourceUrl != null && sourceType != 'iframe') {
               final decodedUrl = _decodeAllAnimeUrl(sourceUrl);
               if (decodedUrl != null && decodedUrl.isNotEmpty) {
@@ -244,7 +247,7 @@ class AnimeApiService {
           if (sources.isNotEmpty) {
             debugPrint('✅ Found ${sources.length} video sources');
           }
-          
+
           return {
             'sources': sources,
             'translationType': translationType,
@@ -269,22 +272,22 @@ class AnimeApiService {
         return '${match.group(1)}p';
       }
     }
-    
+
     // Default quality labels based on source name
     if (sourceName?.contains('1080') == true) return '1080p';
     if (sourceName?.contains('720') == true) return '720p';
     if (sourceName?.contains('480') == true) return '480p';
     if (sourceName?.contains('360') == true) return '360p';
-    
+
     // For M3U8, it's usually adaptive quality
     if (url.contains('.m3u8')) return 'Auto';
-    
+
     return 'Default';
   }
 
   Future<List<Map<String, dynamic>>> getLatestReleases({
-    int page = 1, 
-    int limit = 30, 
+    int page = 1,
+    int limit = 30,
     bool allowAdult = false,
     List<String>? genres,
   }) async {
@@ -309,7 +312,7 @@ class AnimeApiService {
         'allowUnknown': false,
         'sortBy': 'Latest_Update',
       };
-      
+
       if (genres != null && genres.isNotEmpty) {
         searchInput['genres'] = genres;
       }
@@ -320,10 +323,10 @@ class AnimeApiService {
         'page': page,
       };
 
-      final response = await _dio.get(
+      final response = await _dio.post(
         ApiConstants.apiPath,
-        queryParameters: {
-          'variables': jsonEncode(variables),
+        data: {
+          'variables': variables,
           'query': latestQuery,
         },
       );
@@ -336,7 +339,7 @@ class AnimeApiService {
 
         return shows.map((show) {
           final availableEps = show['availableEpisodes'] as Map?;
-          
+
           return {
             'id': show['_id'],
             'title': show['name'],
@@ -363,42 +366,42 @@ class AnimeApiService {
       if (subEp != null) return 'Ep $subEp';
       if (dubEp != null) return 'Ep $dubEp';
     }
-    
+
     if (availableEps != null) {
       final subCount = availableEps['sub'];
       final dubCount = availableEps['dub'];
       if (subCount != null) return 'Ep $subCount';
       if (dubCount != null) return 'Ep $dubCount';
     }
-    
+
     return 'New';
   }
 
   String? _decodeAllAnimeUrl(String encodedUrl) {
     try {
       if (!encodedUrl.startsWith('--')) return encodedUrl;
-      
+
       final encoded = encodedUrl.substring(2);
       final decoded = StringBuffer();
-      
+
       for (int i = 0; i < encoded.length; i += 2) {
         if (i + 1 >= encoded.length) break;
         final hexChar = encoded.substring(i, i + 2);
         final charCode = int.parse(hexChar, radix: 16);
-        
+
         final transformed = _transformChar(charCode);
         if (transformed != null) {
           decoded.write(transformed);
         }
       }
-      
+
       String result = decoded.toString();
-      
+
       // Fix clock.json
       if (result.contains('/clock')) {
         result = result.replaceAll('/clock', '/clock.json');
       }
-      
+
       // Handle wixmp proxy (extract real URL)
       // Matches ani-cli: sed 's|repackager.wixmp.com/||g;s|\.urlset.*||g'
       if (result.contains('repackager.wixmp.com/')) {
@@ -409,7 +412,7 @@ class AnimeApiService {
         }
         debugPrint('🔗 Extracted wixmp URL: $result');
       }
-      
+
       return result;
     } catch (e) {
       debugPrint('Error decoding URL: $e');
@@ -433,7 +436,7 @@ class AnimeApiService {
       0x63: '[', 0x65: ']', 0x78: '@', 0x19: '!', 0x1c: '\$', 0x1e: '&', 0x10: '(', 0x11: ')',
       0x12: '*', 0x13: '+', 0x14: ',', 0x03: ';', 0x05: '=', 0x1d: '%',
     };
-    
+
     return charMap[code];
   }
 }
