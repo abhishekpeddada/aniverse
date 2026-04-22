@@ -193,7 +193,7 @@ class AnimeApiService {
         query($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
           episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) {
             episodeString
-            sourceUrls
+            tobecparsed
           }
         }
       ''';
@@ -216,11 +216,35 @@ class AnimeApiService {
 
       if (response.data != null && response.data['data'] != null) {
         final episode = response.data['data']['episode'];
+        final tobecparsed = episode['tobecparsed'] as String?;
+
+        final sources = <Map<String, dynamic>>[];
+        if (tobecparsed != null && tobecparsed.isNotEmpty) {
+          final decodedSources = _decodeAllAnimeUrl(tobecparsed);
+          if (decodedSources != null && decodedSources.isNotEmpty) {
+            for (final line in decodedSources.split('\n')) {
+              final trimmed = line.trim();
+              if (trimmed.isEmpty) continue;
+              final parts = trimmed.split(' :');
+              if (parts.length == 2) {
+                final sourceName = parts[0].trim();
+                final sourceUrl = parts[1].trim();
+                if (sourceUrl.isNotEmpty) {
+                  sources.add({
+                    'url': sourceUrl,
+                    'quality': _extractQuality(sourceName, sourceUrl),
+                    'isM3U8': sourceUrl.contains('.m3u8'),
+                    'sourceName': sourceName,
+                    'priority': 0,
+                  });
+                }
+              }
+            }
+          }
+        }
+
         final sourceUrls = episode['sourceUrls'] as List?;
-
         if (sourceUrls != null && sourceUrls.isNotEmpty) {
-          final sources = <Map<String, dynamic>>[];
-
           for (var source in sourceUrls) {
             final sourceUrl = source['sourceUrl'] as String?;
             final sourceName = source['sourceName'] as String?;
@@ -241,18 +265,18 @@ class AnimeApiService {
               }
             }
           }
-
-          sources.sort((a, b) => (b['priority'] as num).compareTo(a['priority'] as num));
-
-          if (sources.isNotEmpty) {
-            debugPrint('✅ Found ${sources.length} video sources');
-          }
-
-          return {
-            'sources': sources,
-            'translationType': translationType,
-          };
         }
+
+        sources.sort((a, b) => (b['priority'] as num).compareTo(a['priority'] as num));
+
+        if (sources.isNotEmpty) {
+          debugPrint('✅ Found ${sources.length} video sources');
+        }
+
+        return {
+          'sources': sources,
+          'translationType': translationType,
+        };
       }
 
       return null;
@@ -264,7 +288,6 @@ class AnimeApiService {
   }
 
   String _extractQuality(String? sourceName, String url) {
-    // Try to extract quality from source name
     if (sourceName != null) {
       final qualityRegex = RegExp(r'(\d{3,4})[pP]');
       final match = qualityRegex.firstMatch(sourceName);
@@ -273,15 +296,11 @@ class AnimeApiService {
       }
     }
 
-    // Default quality labels based on source name
     if (sourceName?.contains('1080') == true) return '1080p';
     if (sourceName?.contains('720') == true) return '720p';
     if (sourceName?.contains('480') == true) return '480p';
     if (sourceName?.contains('360') == true) return '360p';
-
-    // For M3U8, it's usually adaptive quality
     if (url.contains('.m3u8')) return 'Auto';
-
     return 'Default';
   }
 
@@ -439,4 +458,12 @@ class AnimeApiService {
 
     return charMap[code];
   }
+}
+
+
+class ApiConstants {
+  static const String baseUrl = 'https://api.allanime.day';
+  static const String apiPath = '/api';
+  static const String referer = 'https://allanime.to';
+  static const String userAgent = 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0';
 }
