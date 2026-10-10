@@ -22,6 +22,10 @@ class AnimeApiService {
 
   late final AllAnimeCrypto _crypto = AllAnimeCrypto(_dio);
 
+  /// Why the last [getEpisodeSources] call found nothing, for the UI to show.
+  String? lastSourceError;
+  final List<String> _providerErrors = [];
+
   AnimeApiService() {
     if (kDebugMode) {
       _dio.interceptors.add(LogInterceptor(
@@ -183,15 +187,25 @@ class AnimeApiService {
     String episodeId, {
     String translationType = 'sub', // 'sub' or 'dub'
   }) async {
+    lastSourceError = null;
+    _providerErrors.clear();
+    var stage = 'parsing episode id';
     try {
       debugPrint('🎬 Getting episode sources: $episodeId (type: $translationType)');
 
       final parts = episodeId.split('-');
-      if (parts.length < 2) return null;
+      if (parts.length < 2) {
+        lastSourceError = 'Unexpected episode id "$episodeId"';
+        return null;
+      }
 
       final showId = parts[0];
       final episodeString = parts.sublist(1).join('-');
 
+      stage = 'fetching decryption key from ${ApiConstants.referer}';
+      await _crypto.ensureKeys();
+
+      stage = 'building encrypted request';
       final variables = {
         'showId': showId,
         'translationType': translationType,
@@ -205,6 +219,7 @@ class AnimeApiService {
         'aaReq': await _crypto.buildAaReq(ApiConstants.sourceQueryHash),
       };
 
+      stage = 'requesting sources from ${ApiConstants.baseUrl}';
       final response = await _dio.get(
         ApiConstants.apiPath,
         queryParameters: {
@@ -215,9 +230,12 @@ class AnimeApiService {
 
       debugPrint('✅ Episode sources response: ${response.statusCode}');
 
-      final body = _asJsonMap(response.data)?['data'];
+      stage = 'reading source response';
+      final json = _asJsonMap(response.data);
+      final body = json?['data'];
       Map<String, dynamic>? episode;
       if (body is Map && body['tobeparsed'] is String) {
+        stage = 'decrypting source response';
         final clear = await _crypto.decryptTobeParsed(body['tobeparsed'] as String);
         final decoded = _asJsonMap(clear);
         episode = _asJsonMap(decoded?['data'] ?? decoded)?['episode'] as Map<String, dynamic>?;
@@ -226,8 +244,15 @@ class AnimeApiService {
       }
 
       final sourceUrls = episode?['sourceUrls'] as List?;
-      if (sourceUrls == null || sourceUrls.isEmpty) return null;
+      if (sourceUrls == null || sourceUrls.isEmpty) {
+        final errors = json?['errors'];
+        lastSourceError = errors != null
+            ? 'API error: ${_short(jsonEncode(errors))}'
+            : 'API returned no sources (${_short(jsonEncode(json ?? response.data))})';
+        return null;
+      }
 
+      stage = 'resolving providers';
       final sources = <Map<String, dynamic>>[];
       for (final source in sourceUrls) {
         final sourceUrl = source['sourceUrl'] as String?;
@@ -257,6 +282,9 @@ class AnimeApiService {
 
       if (sources.isNotEmpty) {
         debugPrint('✅ Found ${sources.length} video sources');
+      } else {
+        lastSourceError = 'All ${sourceUrls.length} providers failed'
+            '${_providerErrors.isEmpty ? '' : ': ${_providerErrors.join('; ')}'}';
       }
 
       return {
@@ -264,11 +292,27 @@ class AnimeApiService {
         'translationType': translationType,
       };
     } catch (e, stackTrace) {
-      debugPrint('❌ Error getting episode sources: $e');
+      lastSourceError = 'Failed while $stage: ${_describeError(e)}';
+      debugPrint('❌ Error getting episode sources: $lastSourceError');
       debugPrint('📍 Stack trace: $stackTrace');
       return null;
     }
   }
+
+  String _describeError(Object e) {
+    if (e is DioException) {
+      final status = e.response?.statusCode;
+      final host = e.requestOptions.uri.host;
+      if (status != null) {
+        return 'HTTP $status from $host (${_short('${e.response?.data}')})';
+      }
+      return '${e.type.name} contacting $host${e.message == null ? '' : ': ${e.message}'}';
+    }
+    return _short(e.toString());
+  }
+
+  String _short(String text, [int max = 200]) =>
+      text.length <= max ? text : '${text.substring(0, max)}…';
 
   Map<String, dynamic>? _asJsonMap(dynamic value) {
     if (value is Map<String, dynamic>) return value;
@@ -331,7 +375,11 @@ class AnimeApiService {
       }
 
       walk(json);
+      if (results.isEmpty) {
+        _providerErrors.add('$sourceName: no links in response');
+      }
     } catch (e) {
+      _providerErrors.add('$sourceName: ${_describeError(e)}');
       debugPrint('⚠️ Provider $sourceName ($path) failed: $e');
     }
     return results;

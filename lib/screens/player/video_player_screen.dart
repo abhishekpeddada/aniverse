@@ -616,9 +616,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       if (sources == null ||
           sources['sources'] == null ||
           (sources['sources'] as List).isEmpty) {
+        final reason = ref.read(animeApiServiceProvider).lastSourceError;
         setState(() {
           hasError = true;
-          errorMessage = 'No video sources available for $_translationType';
+          errorMessage = 'No video sources available for $_translationType'
+              '${reason == null ? '' : '\n\n$reason'}';
         });
         return;
       }
