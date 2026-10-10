@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pointycastle/export.dart';
 import 'package:AniVerse/services/hls_downloader.dart';
@@ -64,6 +68,54 @@ seg2.m4s
     expect(iv.sublist(0, 14).every((b) => b == 0), isTrue);
   });
 
+  test('download writes parallel-fetched segments in playlist order', () async {
+    final dio = Dio()
+      ..httpClientAdapter = _FakeAdapter({
+        'https://cdn.example/hls/master.m3u8': '#EXTM3U\n'
+            '${List.generate(20, (i) => '#EXTINF:1,\nseg$i.ts').join('\n')}',
+        for (var i = 0; i < 20; i++) 'https://cdn.example/hls/seg$i.ts': 'S$i;',
+      });
+    final dir = await Directory.systemTemp.createTemp('hls_test');
+    final out = '${dir.path}/out.ts';
+    final progress = <int>[];
+
+    await HlsDownloader(dio).download(
+      playlistUrl: 'https://cdn.example/hls/master.m3u8',
+      outputPath: out,
+      headers: const {},
+      onProgress: (done, total, bytes) => progress.add(done),
+    );
+
+    expect(await File(out).readAsString(),
+        List.generate(20, (i) => 'S$i;').join());
+    expect(progress, List.generate(20, (i) => i + 1));
+    await dir.delete(recursive: true);
+  });
+
+  test('download fails cleanly and leaves no partial file', () async {
+    final dio = Dio()
+      ..httpClientAdapter = _FakeAdapter({
+        'https://cdn.example/hls/master.m3u8':
+            '#EXTM3U\n#EXTINF:1,\nseg0.ts\n#EXTINF:1,\nmissing.ts\n#EXTINF:1,\nseg2.ts',
+        'https://cdn.example/hls/seg0.ts': 'a',
+        'https://cdn.example/hls/seg2.ts': 'c',
+      });
+    final dir = await Directory.systemTemp.createTemp('hls_test');
+    final out = '${dir.path}/out.ts';
+
+    await expectLater(
+      HlsDownloader(dio).download(
+        playlistUrl: 'https://cdn.example/hls/master.m3u8',
+        outputPath: out,
+        headers: const {},
+      ),
+      throwsA(isA<DioException>()),
+    );
+    expect(File(out).existsSync(), isFalse);
+    expect(File('$out.part').existsSync(), isFalse);
+    await dir.delete(recursive: true);
+  });
+
   test('decryptSegment reverses AES-128-CBC with PKCS7', () {
     final key = Uint8List.fromList(List.generate(16, (i) => i * 3));
     final iv = HlsDownloader.sequenceIv(42);
@@ -81,4 +133,25 @@ seg2.m4s
 
     expect(HlsDownloader.decryptSegment(encrypted, key, iv), plain);
   });
+}
+
+/// Serves fixed bodies by URL after a random delay, so parallel requests
+/// finish out of order. Unknown URLs return 404.
+class _FakeAdapter implements HttpClientAdapter {
+  _FakeAdapter(this.bodies);
+
+  final Map<String, String> bodies;
+  final _random = Random(1);
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    await Future<void>.delayed(Duration(milliseconds: _random.nextInt(20)));
+    final body = bodies[options.uri.toString()];
+    if (body == null) return ResponseBody.fromString('', 404);
+    return ResponseBody.fromBytes(utf8.encode(body), 200);
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

@@ -37,6 +37,11 @@ class HlsDownloader {
 
   final Dio _dio;
 
+  /// Segments fetched at the same time. Each segment is its own request, so
+  /// fetching several at once hides per-request latency; they are still
+  /// written to the file in order.
+  static const _parallelSegments = 6;
+
   Future<void> download({
     required String playlistUrl,
     required String outputPath,
@@ -59,8 +64,26 @@ class HlsDownloader {
 
     final partFile = File('$outputPath.part');
     final sink = partFile.openWrite();
-    final keys = <Uri, Uint8List>{};
+    // Futures, so segments sharing a key fetch it once even when in parallel.
+    final keys = <Uri, Future<Uint8List>>{};
     var bytes = 0;
+
+    Future<Uint8List> fetch(HlsSegment segment) async {
+      final data = await _getBytes(segment.uri, headers, cancelToken);
+      if (segment.keyUri == null) return data;
+      final key = await (keys[segment.keyUri!] ??=
+          _getBytes(segment.keyUri!, headers, cancelToken));
+      return decryptSegment(data, key, segment.iv ?? sequenceIv(segment.sequence));
+    }
+
+    // Capture each result or error, so a failure doesn't surface as an
+    // unhandled error from the other requests still in flight.
+    Future<({Uint8List? data, Object? error, StackTrace? stack})> settle(
+            HlsSegment segment) =>
+        fetch(segment).then(
+          (data) => (data: data, error: null, stack: null),
+          onError: (Object e, StackTrace s) => (data: null, error: e, stack: s),
+        );
 
     try {
       if (media.initSegment != null) {
@@ -69,20 +92,23 @@ class HlsDownloader {
         bytes += init.length;
       }
 
-      for (var i = 0; i < media.segments.length; i++) {
-        final segment = media.segments[i];
-        var data = await _getBytes(segment.uri, headers, cancelToken);
-
-        if (segment.keyUri != null) {
-          final key = keys[segment.keyUri!] ??=
-              await _getBytes(segment.keyUri!, headers, cancelToken);
-          data = decryptSegment(
-              data, key, segment.iv ?? sequenceIv(segment.sequence));
+      final segments = media.segments;
+      final inFlight =
+          <Future<({Uint8List? data, Object? error, StackTrace? stack})>>[];
+      var next = 0;
+      for (var i = 0; i < segments.length; i++) {
+        while (next < segments.length && inFlight.length < _parallelSegments) {
+          inFlight.add(settle(segments[next++]));
         }
 
-        sink.add(data);
-        bytes += data.length;
-        onProgress?.call(i + 1, media.segments.length, bytes);
+        final result = await inFlight.removeAt(0);
+        if (result.error != null) {
+          Error.throwWithStackTrace(result.error!, result.stack!);
+        }
+
+        sink.add(result.data!);
+        bytes += result.data!.length;
+        onProgress?.call(i + 1, segments.length, bytes);
       }
 
       await sink.flush();
