@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:volume_controller/volume_controller.dart';
@@ -566,11 +568,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
         await player.open(Media(widget.offlineFilePath!));
 
-        final subtitlePath =
-            DownloadService.subtitlePathFor(widget.offlineFilePath!);
-        if (await File(subtitlePath).exists()) {
-          await player.setSubtitleTrack(
-              SubtitleTrack.uri(subtitlePath, title: 'English', language: 'en'));
+        final subtitleFile =
+            File(DownloadService.subtitlePathFor(widget.offlineFilePath!));
+        if (await subtitleFile.exists()) {
+          unawaited(_loadSubtitle(subtitleFile.readAsString));
         }
 
         setState(() {
@@ -772,8 +773,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       );
 
       if (subtitleUrl != null) {
-        await player.setSubtitleTrack(
-            SubtitleTrack.uri(subtitleUrl, title: 'English', language: 'en'));
+        unawaited(_loadSubtitle(() => _fetchSubtitle(subtitleUrl, headers)));
       }
 
       final storage = ref.read(storageServiceProvider);
@@ -837,6 +837,52 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     } catch (e) {
       debugPrint('❌ Error playing source $_currentSourceIndex: $e');
       _playNextSource();
+    }
+  }
+
+  /// Adds an external subtitle once the video has loaded.
+  ///
+  /// mpv only accepts `sub-add` for a loaded file, so adding the track right
+  /// after `open()` worked or failed depending on timing. Waiting for the
+  /// duration (known once the file is loaded) makes it deterministic, and
+  /// fetching the text ourselves avoids mpv requesting it without headers.
+  Future<void> _loadSubtitle(Future<String> Function() read) async {
+    final attempt = _sourceAttempt;
+    try {
+      final text = await read();
+      if (player.state.duration == Duration.zero) {
+        await player.stream.duration
+            .firstWhere((d) => d > Duration.zero)
+            .timeout(const Duration(seconds: 60));
+      }
+      // The user may have switched source or episode while this loaded.
+      if (!mounted || attempt != _sourceAttempt) return;
+      await player.setSubtitleTrack(
+          SubtitleTrack.data(text, title: 'English', language: 'en'));
+    } catch (e) {
+      debugPrint('⚠️ Failed to load subtitles: $e');
+      if (mounted && attempt == _sourceAttempt) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Subtitles unavailable: $e')),
+        );
+      }
+    }
+  }
+
+  Future<String> _fetchSubtitle(String url, Map<String, String> headers) async {
+    for (var attempt = 1;; attempt++) {
+      try {
+        final response = await http
+            .get(Uri.parse(url), headers: headers)
+            .timeout(const Duration(seconds: 15));
+        if (response.statusCode != 200) {
+          throw HttpException('HTTP ${response.statusCode} for subtitles');
+        }
+        return utf8.decode(response.bodyBytes, allowMalformed: true);
+      } catch (_) {
+        if (attempt >= 3) rethrow;
+        await Future<void>.delayed(Duration(seconds: attempt));
+      }
     }
   }
 

@@ -60,4 +60,15 @@ void main() {
     expect(decoded, config);
     expect(HianimeService.defaultSubtitle(decoded), 'https://cdn.example/en.vtt');
   });
+
+  test('defaultSubtitle falls back to English, then the first track', () {
+    const english = '{"subtitles":[{"src":"https://c/fr.vtt","label":"French"},'
+        '{"src":"https://c/en.vtt","label":"English"}]}';
+    expect(HianimeService.defaultSubtitle(english), 'https://c/en.vtt');
+
+    const unlabeled = '{"subtitles":[{"file":"https://c/a.vtt"},{"file":"https://c/b.vtt"}]}';
+    expect(HianimeService.defaultSubtitle(unlabeled), 'https://c/a.vtt');
+
+    expect(HianimeService.defaultSubtitle('{"sources":[]}'), isNull);
+  });
 }

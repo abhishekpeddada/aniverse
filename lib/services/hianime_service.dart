@@ -277,19 +277,30 @@ class HianimeService {
     return utf8.decode(out, allowMalformed: true);
   }
 
+  /// Picks the subtitle track: the one marked default (as ani-cli does),
+  /// else an English one, else the first.
   @visibleForTesting
   static String? defaultSubtitle(String config) {
     final start = config.indexOf('"subtitles":[');
     if (start == -1) return null;
     final rest = config.substring(start + '"subtitles":['.length);
     final end = rest.indexOf('}]');
-    final list = end == -1 ? rest : rest.substring(0, end);
+    final entries = (end == -1 ? rest : rest.substring(0, end)).split('},{');
 
-    for (final entry in list.split('},{')) {
-      if (!entry.contains('"default":true')) continue;
-      return RegExp(r'"src":"([^"]*)"').firstMatch(entry)?.group(1);
+    String? srcOf(String entry) =>
+        RegExp(r'"(?:src|file)":"([^"]*)"').firstMatch(entry)?.group(1);
+
+    for (final entry in entries) {
+      if (entry.contains('"default":true')) return srcOf(entry);
     }
-    return null;
+    for (final entry in entries) {
+      if (RegExp(r'english|"(?:lang|srclang|language)":"en', caseSensitive: false)
+          .hasMatch(entry)) {
+        final src = srcOf(entry);
+        if (src != null) return src;
+      }
+    }
+    return entries.map(srcOf).whereType<String>().firstOrNull;
   }
 
   /// The episode and server endpoints return `{"html": "..."}`.
