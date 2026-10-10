@@ -640,6 +640,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     }
   }
 
+  static const _defaultStreamHeaders = {
+    'Referer': 'https://mkissa.to',
+    'User-Agent':
+        'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Origin': 'https://mkissa.to',
+  };
+
   Future<void> _playCurrentSource() async {
     if (_currentSourceIndex >= _availableSources.length) {
       setState(() {
@@ -650,7 +657,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     }
 
     try {
-      final videoUrl = _availableSources[_currentSourceIndex]['url'];
+      final source = _availableSources[_currentSourceIndex];
+      final videoUrl = source['url'];
+      // Each provider needs its own Referer; fall back to the AllAnime one.
+      final headers = Map<String, String>.from(
+          (source['headers'] as Map?) ?? _defaultStreamHeaders);
+      final subtitleUrl = source['subtitle'] as String?;
       debugPrint(
           '🎥 Playing URL (source ${_currentSourceIndex + 1}/${_availableSources.length}): ${videoUrl.substring(0, videoUrl.length > 80 ? 80 : videoUrl.length)}...');
 
@@ -685,8 +697,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             await _saveVlcWatchHistory(positionMs: 0);
 
             final vlcProcess = await Process.start('vlc', [
-              '--http-referrer=https://mkissa.to',
-              '--http-user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              '--http-referrer=${headers['Referer'] ?? ''}',
+              '--http-user-agent=${headers['User-Agent'] ?? ''}',
+              if (subtitleUrl != null) '--sub-file=$subtitleUrl',
               '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
               videoUrl,
             ]);
@@ -704,8 +717,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
              await _saveVlcWatchHistory(positionMs: 0);
 
             final mpvProcess = await Process.start('mpv', [
-              '--referrer=https://mkissa.to',
-              '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              '--referrer=${headers['Referer'] ?? ''}',
+              '--user-agent=${headers['User-Agent'] ?? ''}',
+              if (subtitleUrl != null) '--sub-file=$subtitleUrl',
               '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
               videoUrl,
             ]);
@@ -735,17 +749,14 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       }
 
       await player.open(
-        Media(
-          videoUrl,
-          httpHeaders: {
-            'Referer': 'https://mkissa.to',
-            'User-Agent':
-                'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            'Origin': 'https://mkissa.to',
-          },
-        ),
+        Media(videoUrl, httpHeaders: headers),
         play: false,
       );
+
+      if (subtitleUrl != null) {
+        await player.setSubtitleTrack(
+            SubtitleTrack.uri(subtitleUrl, title: 'English', language: 'en'));
+      }
 
       final storage = ref.read(storageServiceProvider);
       final savedHistory =

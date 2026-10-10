@@ -56,8 +56,8 @@ dependencies:
 
   # AI Recommendations
   tflite_flutter: ^0.12.1
-  cryptography: ^2.9.0
-  crypto: ^3.0.7
+  cronet_http: ^1.10.0
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

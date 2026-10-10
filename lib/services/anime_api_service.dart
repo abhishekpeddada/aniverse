@@ -1,10 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import '../core/constants/api_constants.dart';
 import '../models/anime_model.dart';
 import '../models/episode_model.dart';
-import 'allanime_crypto.dart';
+import 'hianime_service.dart';
 
 class AnimeApiService {
   final Dio _dio = Dio(BaseOptions(
@@ -20,11 +19,11 @@ class AnimeApiService {
           },
   ));
 
-  late final AllAnimeCrypto _crypto = AllAnimeCrypto(_dio);
+  final HianimeService _hianime = HianimeService();
+  final Map<String, List<String>> _titleCache = {};
 
   /// Why the last [getEpisodeSources] call found nothing, for the UI to show.
   String? lastSourceError;
-  final List<String> _providerErrors = [];
 
   AnimeApiService() {
     if (kDebugMode) {
@@ -188,7 +187,6 @@ class AnimeApiService {
     String translationType = 'sub', // 'sub' or 'dub'
   }) async {
     lastSourceError = null;
-    _providerErrors.clear();
     var stage = 'parsing episode id';
     try {
       debugPrint('🎬 Getting episode sources: $episodeId (type: $translationType)');
@@ -202,91 +200,19 @@ class AnimeApiService {
       final showId = parts[0];
       final episodeString = parts.sublist(1).join('-');
 
-      stage = 'fetching decryption key from ${ApiConstants.referer}';
-      await _crypto.ensureKeys();
+      // The catalog comes from AllAnime, but its stream endpoint is gone, so
+      // streams are resolved on hianime (ani-cli's provider) by show title.
+      stage = 'looking up the show title';
+      final titles = await _showTitles(showId);
 
-      stage = 'building encrypted request';
-      final variables = {
-        'showId': showId,
-        'translationType': translationType,
-        'episodeString': episodeString,
-      };
-      final extensions = {
-        'persistedQuery': {
-          'version': 1,
-          'sha256Hash': ApiConstants.sourceQueryHash,
-        },
-        'aaReq': await _crypto.buildAaReq(ApiConstants.sourceQueryHash),
-      };
-
-      stage = 'requesting sources from ${ApiConstants.baseUrl}';
-      final response = await _dio.get(
-        ApiConstants.apiPath,
-        queryParameters: {
-          'variables': jsonEncode(variables),
-          'extensions': jsonEncode(extensions),
-        },
+      stage = 'fetching the stream from hianime';
+      final sources = await _hianime.getSources(
+        titles: titles,
+        episodeNumber: episodeString,
+        translationType: translationType,
       );
 
-      debugPrint('✅ Episode sources response: ${response.statusCode}');
-
-      stage = 'reading source response';
-      final json = _asJsonMap(response.data);
-      final body = json?['data'];
-      Map<String, dynamic>? episode;
-      if (body is Map && body['tobeparsed'] is String) {
-        stage = 'decrypting source response';
-        final clear = await _crypto.decryptTobeParsed(body['tobeparsed'] as String);
-        final decoded = _asJsonMap(clear);
-        episode = _asJsonMap(decoded?['data'] ?? decoded)?['episode'] as Map<String, dynamic>?;
-      } else if (body is Map) {
-        episode = body['episode'] as Map<String, dynamic>?;
-      }
-
-      final sourceUrls = episode?['sourceUrls'] as List?;
-      if (sourceUrls == null || sourceUrls.isEmpty) {
-        final errors = json?['errors'];
-        lastSourceError = errors != null
-            ? 'API error: ${_short(jsonEncode(errors))}'
-            : 'API returned no sources (${_short(jsonEncode(json ?? response.data))})';
-        return null;
-      }
-
-      stage = 'resolving providers';
-      final sources = <Map<String, dynamic>>[];
-      for (final source in sourceUrls) {
-        final sourceUrl = source['sourceUrl'] as String?;
-        final sourceName = source['sourceName'] as String?;
-        final sourceType = source['type'] as String?;
-        final priority = source['priority'] as num? ?? 0;
-
-        if (sourceUrl == null || sourceType == 'iframe') continue;
-
-        final decodedUrl = _decodeAllAnimeUrl(sourceUrl);
-        if (decodedUrl == null || decodedUrl.isEmpty) continue;
-
-        if (decodedUrl.startsWith('/')) {
-          // Provider path: resolve it on the AllAnime provider host.
-          sources.addAll(await _resolveProviderLinks(decodedUrl, sourceName, priority));
-        } else {
-          sources.add(_sourceEntry(
-            decodedUrl,
-            _extractQuality(sourceName, decodedUrl),
-            sourceName,
-            priority,
-          ));
-        }
-      }
-
-      sources.sort((a, b) => (b['priority'] as num).compareTo(a['priority'] as num));
-
-      if (sources.isNotEmpty) {
-        debugPrint('✅ Found ${sources.length} video sources');
-      } else {
-        lastSourceError = 'All ${sourceUrls.length} providers failed'
-            '${_providerErrors.isEmpty ? '' : ': ${_providerErrors.join('; ')}'}';
-      }
-
+      debugPrint('✅ Found ${sources.length} video sources');
       return {
         'sources': sources,
         'translationType': translationType,
@@ -299,135 +225,54 @@ class AnimeApiService {
     }
   }
 
+  /// Titles to search hianime with: AllAnime's name first, then the English
+  /// and alternative names when the API provides them.
+  Future<List<String>> _showTitles(String showId) async {
+    final cached = _titleCache[showId];
+    if (cached != null) return cached;
+
+    Future<Map?> fetch(String fields) async {
+      final response = await _dio.post(
+        ApiConstants.apiPath,
+        data: {
+          'variables': {'showId': showId},
+          'query': 'query(\$showId: String!) { show(_id: \$showId) { $fields } }',
+        },
+      );
+      final data = response.data;
+      if (data is! Map || data['errors'] != null) return null;
+      return data['data']?['show'] as Map?;
+    }
+
+    final show = await fetch('name englishName altNames') ?? await fetch('name');
+    if (show == null) {
+      throw StateError('AllAnime has no show $showId');
+    }
+
+    final titles = <String>{
+      for (final title in [
+        show['name'],
+        show['englishName'],
+        ...?(show['altNames'] as List?)?.take(3),
+      ])
+        if (title is String && title.trim().isNotEmpty) title.trim(),
+    }.toList();
+    if (titles.isEmpty) throw StateError('Show $showId has no title');
+
+    _titleCache[showId] = titles;
+    return titles;
+  }
+
   String _describeError(Object e) {
     if (e is DioException) {
       final status = e.response?.statusCode;
       final host = e.requestOptions.uri.host;
-      if (status != null) {
-        return 'HTTP $status from $host (${_short('${e.response?.data}')})';
-      }
+      if (status != null) return 'HTTP $status from $host';
       return '${e.type.name} contacting $host${e.message == null ? '' : ': ${e.message}'}';
     }
-    return _short(e.toString());
-  }
-
-  String _short(String text, [int max = 200]) =>
-      text.length <= max ? text : '${text.substring(0, max)}…';
-
-  Map<String, dynamic>? _asJsonMap(dynamic value) {
-    if (value is Map<String, dynamic>) return value;
-    if (value is String) {
-      final decoded = jsonDecode(value);
-      return decoded is Map<String, dynamic> ? decoded : null;
-    }
-    return null;
-  }
-
-  Map<String, dynamic> _sourceEntry(
-    String url,
-    String quality,
-    String? sourceName,
-    num priority,
-  ) {
-    return {
-      'url': url,
-      'quality': quality,
-      'isM3U8': url.contains('.m3u8'),
-      'sourceName': sourceName ?? 'Unknown',
-      'priority': priority,
-    };
-  }
-
-  /// Resolves an AllAnime provider path (ani-cli's `get_links`) into playable
-  /// links: one per resolution for MP4 providers, plus HLS master playlists.
-  Future<List<Map<String, dynamic>>> _resolveProviderLinks(
-    String path,
-    String? sourceName,
-    num priority,
-  ) async {
-    final results = <Map<String, dynamic>>[];
-    try {
-      final response = await _dio.get(
-        '${ApiConstants.providerBase}$path',
-        options: Options(headers: {'Referer': ApiConstants.referer}),
-      );
-      final json = response.data is String ? jsonDecode(response.data as String) : response.data;
-
-      void walk(dynamic node) {
-        if (node is Map) {
-          final link = node['link'];
-          final resolution = node['resolutionStr'];
-          if (link is String && resolution is String) {
-            for (final entry in _expandWixmp(link, resolution)) {
-              results.add(_sourceEntry(entry.url, entry.quality, sourceName, priority));
-            }
-          }
-
-          final hlsUrl = node['url'];
-          if (hlsUrl is String && node['hardsub_lang'] == 'en-US') {
-            results.add(_sourceEntry(hlsUrl, 'Auto', sourceName, priority));
-          }
-
-          node.values.forEach(walk);
-        } else if (node is List) {
-          node.forEach(walk);
-        }
-      }
-
-      walk(json);
-      if (results.isEmpty) {
-        _providerErrors.add('$sourceName: no links in response');
-      }
-    } catch (e) {
-      _providerErrors.add('$sourceName: ${_describeError(e)}');
-      debugPrint('⚠️ Provider $sourceName ($path) failed: $e');
-    }
-    return results;
-  }
-
-  /// Mirrors ani-cli's wixmp handling: strip the repackager wrapper and, when
-  /// the URL lists several qualities (`,480p,720p,/mp4`), emit one link each.
-  List<({String url, String quality})> _expandWixmp(String link, String resolution) {
-    final quality = RegExp(r'^\d+$').hasMatch(resolution) ? '${resolution}p' : resolution;
-    if (!link.contains('repackager.wixmp.com/')) {
-      return [(url: link, quality: quality)];
-    }
-
-    final extract = link
-        .replaceAll('repackager.wixmp.com/', '')
-        .replaceFirst(RegExp(r'\.urlset.*'), '');
-    final listed = RegExp(r'/,([^/]*),/mp4').firstMatch(link)?.group(1);
-    if (listed == null) return [(url: extract, quality: quality)];
-
-    return [
-      for (final q in listed.split(',').where((q) => q.isNotEmpty))
-        (
-          url: extract.replaceAll(RegExp(r',[^/]*'), q),
-          quality: RegExp(r'^\d+$').hasMatch(q) ? '${q}p' : q,
-        ),
-    ];
-  }
-
-  String _extractQuality(String? sourceName, String url) {
-    // Try to extract quality from source name
-    if (sourceName != null) {
-      final qualityRegex = RegExp(r'(\d{3,4})[pP]');
-      final match = qualityRegex.firstMatch(sourceName);
-      if (match != null) {
-        return '${match.group(1)}p';
-      }
-    }
-
-    // Default quality labels based on source name
-    if (sourceName?.contains('1080') == true) return '1080p';
-    if (sourceName?.contains('720') == true) return '720p';
-    if (sourceName?.contains('480') == true) return '480p';
-    if (sourceName?.contains('360') == true) return '360p';
-
-    // For M3U8, it's usually adaptive quality
-    if (url.contains('.m3u8')) return 'Auto';
-
-    return 'Default';
+    if (e is HianimeException) return e.message;
+    final text = e.toString();
+    return text.length <= 200 ? text : '${text.substring(0, 200)}…';
   }
 
   Future<List<Map<String, dynamic>>> getLatestReleases({
@@ -520,68 +365,5 @@ class AnimeApiService {
     }
 
     return 'New';
-  }
-
-  String? _decodeAllAnimeUrl(String encodedUrl) {
-    try {
-      if (!encodedUrl.startsWith('--')) return encodedUrl;
-
-      final encoded = encodedUrl.substring(2);
-      final decoded = StringBuffer();
-
-      for (int i = 0; i < encoded.length; i += 2) {
-        if (i + 1 >= encoded.length) break;
-        final hexChar = encoded.substring(i, i + 2);
-        final charCode = int.parse(hexChar, radix: 16);
-
-        final transformed = _transformChar(charCode);
-        if (transformed != null) {
-          decoded.write(transformed);
-        }
-      }
-
-      String result = decoded.toString();
-
-      // Fix clock.json
-      if (result.contains('/clock')) {
-        result = result.replaceAll('/clock', '/clock.json');
-      }
-
-      // Handle wixmp proxy (extract real URL)
-      // Matches ani-cli: sed 's|repackager.wixmp.com/||g;s|\.urlset.*||g'
-      if (result.contains('repackager.wixmp.com/')) {
-        result = result.replaceAll('repackager.wixmp.com/', '');
-        final urlsetIndex = result.indexOf('.urlset');
-        if (urlsetIndex != -1) {
-          result = result.substring(0, urlsetIndex);
-        }
-        debugPrint('🔗 Extracted wixmp URL: $result');
-      }
-
-      return result;
-    } catch (e) {
-      debugPrint('Error decoding URL: $e');
-      return null;
-    }
-  }
-
-  String? _transformChar(int code) {
-    const charMap = {
-      0x79: 'A', 0x7a: 'B', 0x7b: 'C', 0x7c: 'D', 0x7d: 'E', 0x7e: 'F', 0x7f: 'G',
-      0x70: 'H', 0x71: 'I', 0x72: 'J', 0x73: 'K', 0x74: 'L', 0x75: 'M', 0x76: 'N', 0x77: 'O',
-      0x68: 'P', 0x69: 'Q', 0x6a: 'R', 0x6b: 'S', 0x6c: 'T', 0x6d: 'U', 0x6e: 'V', 0x6f: 'W',
-      0x60: 'X', 0x61: 'Y', 0x62: 'Z',
-      0x59: 'a', 0x5a: 'b', 0x5b: 'c', 0x5c: 'd', 0x5d: 'e', 0x5e: 'f', 0x5f: 'g',
-      0x50: 'h', 0x51: 'i', 0x52: 'j', 0x53: 'k', 0x54: 'l', 0x55: 'm', 0x56: 'n', 0x57: 'o',
-      0x48: 'p', 0x49: 'q', 0x4a: 'r', 0x4b: 's', 0x4c: 't', 0x4d: 'u', 0x4e: 'v', 0x4f: 'w',
-      0x40: 'x', 0x41: 'y', 0x42: 'z',
-      0x08: '0', 0x09: '1', 0x0a: '2', 0x0b: '3', 0x0c: '4', 0x0d: '5', 0x0e: '6', 0x0f: '7',
-      0x00: '8', 0x01: '9',
-      0x15: '-', 0x16: '.', 0x67: '_', 0x46: '~', 0x02: ':', 0x17: '/', 0x07: '?', 0x1b: '#',
-      0x63: '[', 0x65: ']', 0x78: '@', 0x19: '!', 0x1c: '\$', 0x1e: '&', 0x10: '(', 0x11: ')',
-      0x12: '*', 0x13: '+', 0x14: ',', 0x03: ';', 0x05: '=', 0x1d: '%',
-    };
-
-    return charMap[code];
   }
 }
