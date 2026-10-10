@@ -1,8 +1,11 @@
 name: Release APK
 
-# Publishes an APK that an earlier "Build APK" run already produced, without
-# rebuilding it. Runs when this file changes; update SOURCE_RUN_ID, TAG and
-# TARGET_SHA to release a different build.
+# Attaches an APK that an earlier "Build APK" run already produced to the
+# GitHub release TAG, without rebuilding it, and sets the release notes.
+#
+# The release (and its tag) must be created on GitHub first: the workflow
+# token can't create a tag on a commit that adds workflow files. Runs when
+# this file changes; re-run it after creating the release.
 on:
   push:
     branches:
@@ -17,7 +20,6 @@ permissions:
 env:
   SOURCE_RUN_ID: '38053252310'
   TAG: v1.4.0
-  TARGET_SHA: 8e6901595b28f53d486873bf7d7c0a00c36273c0
 
 jobs:
   release:
@@ -31,10 +33,14 @@ jobs:
           github-token: ${{ github.token }}
           path: apk
 
-      - name: Create release
+      - name: Attach APK to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::notice::Release $TAG doesn't exist yet. Create it on GitHub, then re-run this workflow."
+            exit 0
+          fi
           cd apk
           sha256sum app-release.apk > app-release.apk.sha256
           cat > notes.md <<'NOTES'
@@ -52,8 +58,7 @@ jobs:
           - The version shown inside the app is still 1.3.0.
           - Adult titles from the Raiden source may not load.
           NOTES
-          gh release create "$TAG" app-release.apk app-release.apk.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$TARGET_SHA" \
-            --title "AniVerse $TAG" \
-            --notes-file notes.md
+          gh release upload "$TAG" app-release.apk app-release.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "AniVerse $TAG" --notes-file notes.md
