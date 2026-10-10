@@ -683,7 +683,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             await _saveVlcWatchHistory(positionMs: 0);
 
             final vlcProcess = await Process.start('vlc', [
-              '--http-referrer=https://allanime.to',
+              '--http-referrer=https://mkissa.to',
               '--http-user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
               '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
               videoUrl,
@@ -702,7 +702,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
              await _saveVlcWatchHistory(positionMs: 0);
 
             final mpvProcess = await Process.start('mpv', [
-              '--referrer=https://allanime.to',
+              '--referrer=https://mkissa.to',
               '--user-agent=Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
               '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
               videoUrl,
@@ -736,10 +736,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         Media(
           videoUrl,
           httpHeaders: {
-            'Referer': 'https://allanime.to',
+            'Referer': 'https://mkissa.to',
             'User-Agent':
                 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            'Origin': 'https://allanime.to',
+            'Origin': 'https://mkissa.to',
           },
         ),
         play: false,
