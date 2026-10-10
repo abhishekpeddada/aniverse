@@ -27,16 +27,18 @@ subprojects {
 }
 // Some third-party Android plugins hard-code a different JVM target for Java
 // and Kotlin (tflite_flutter uses Java 11 with Kotlin 17, audio_session the
-// reverse), which fails the release build. Align every subproject on 17.
+// reverse, workmanager_android Kotlin 1.8), which fails the release build.
+// Align every subproject on 17. Runs after each plugin's own build script so
+// the plugin's explicit settings don't override it.
 subprojects {
     afterEvaluate {
         extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.compileOptions {
             sourceCompatibility = JavaVersion.VERSION_17
             targetCompatibility = JavaVersion.VERSION_17
         }
-    }
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 }
 
