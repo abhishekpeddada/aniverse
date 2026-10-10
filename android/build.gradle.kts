@@ -25,6 +25,18 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+// Some third-party Android plugins (e.g. tflite_flutter) still compile Java at
+// target 11 while their Kotlin sources use 17, which fails the release build.
+// Align every Android subproject on Java 17.
+subprojects {
+    afterEvaluate {
+        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.compileOptions {
+            sourceCompatibility = JavaVersion.VERSION_17
+            targetCompatibility = JavaVersion.VERSION_17
+        }
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
