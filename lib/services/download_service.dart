@@ -10,6 +10,7 @@ import '../models/download_model.dart';
 import '../models/anime_model.dart';
 import 'download_storage_service.dart';
 import 'anime_api_service.dart';
+import 'hls_downloader.dart';
 
 class DownloadService {
   final Dio _dio;
@@ -21,6 +22,15 @@ class DownloadService {
   final Set<String> _processingIds = {};
   final Set<String> _processingEpisodes = {}; // Track episodes being processed to prevent duplicates
   bool _isForegroundServiceRunning = false;
+  late final HlsDownloader _hls = HlsDownloader(_dio);
+
+  /// Headers for sources that don't specify their own (AllAnime-era links).
+  static const _defaultHeaders = {
+    'Referer': 'https://mkissa.to',
+    'User-Agent':
+        'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Origin': 'https://mkissa.to',
+  };
 
   DownloadService({
     required Dio dio,
@@ -310,6 +320,8 @@ class DownloadService {
     String? episodeTitle,
     required String downloadUrl,
     required String quality,
+    Map<String, String>? headers,
+    String? subtitleUrl,
   }) async {
     final downloadId = '${episodeId}_$quality';
     final episodeKey = '${animeId}_ep$episodeNumber'; // Unique key for episode regardless of episodeId
@@ -420,44 +432,53 @@ class DownloadService {
 
       DateTime lastUpdate = DateTime.now();
 
+      final requestHeaders = headers ?? _defaultHeaders;
+
       try {
-        await _dio.download(
-          downloadUrl,
-          filePath,
-          cancelToken: cancelToken,
-          options: Options(
-            headers: {
-              'Referer': 'https://mkissa.to',
-              'User-Agent':
-                  'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-              'Origin': 'https://mkissa.to',
-            },
-          ),
-          onReceiveProgress: (received, total) {
-            if (total != -1) {
-              final progress = received / total;
-              _progressControllers[downloadId]?.add(progress);
+        if (_isHls(downloadUrl)) {
+          await _downloadHls(
+            download: download,
+            url: downloadUrl,
+            filePath: filePath,
+            headers: requestHeaders,
+            cancelToken: cancelToken,
+          );
+        } else {
+          await _dio.download(
+            downloadUrl,
+            filePath,
+            cancelToken: cancelToken,
+            options: Options(headers: requestHeaders),
+            onReceiveProgress: (received, total) {
+              if (total != -1) {
+                final progress = received / total;
+                _progressControllers[downloadId]?.add(progress);
 
-              final now = DateTime.now();
-              if (now.difference(lastUpdate).inSeconds >= 1) {
-                lastUpdate = now;
-                final updatedDownload = download.copyWith(
-                  totalBytes: total,
-                  downloadedBytes: received,
-                );
-                _storage.updateDownload(updatedDownload);
+                final now = DateTime.now();
+                if (now.difference(lastUpdate).inSeconds >= 1) {
+                  lastUpdate = now;
+                  final updatedDownload = download.copyWith(
+                    totalBytes: total,
+                    downloadedBytes: received,
+                  );
+                  _storage.updateDownload(updatedDownload);
 
-                _updateNotification(
-                  downloadId.hashCode,
-                  animeTitle,
-                  'Episode $episodeNumber',
-                  progress,
-                );
+                  _updateNotification(
+                    downloadId.hashCode,
+                    animeTitle,
+                    'Episode $episodeNumber',
+                    progress,
+                  );
+                }
               }
-            }
-          },
-          deleteOnError: false,
-        );
+            },
+            deleteOnError: false,
+          );
+        }
+
+        if (subtitleUrl != null) {
+          await _downloadSubtitle(subtitleUrl, filePath, requestHeaders);
+        }
 
         final completedDownload = download.copyWith(
           status: DownloadStatus.completed,
@@ -523,6 +544,11 @@ class DownloadService {
       // If not paused or failed, do nothing
       if (download.status != DownloadStatus.paused && 
           download.status != DownloadStatus.failed) {
+        return;
+      }
+
+      if (_isHls(download.downloadUrl)) {
+        await _resumeHls(download);
         return;
       }
 
@@ -655,6 +681,122 @@ class DownloadService {
     }
   }
 
+  static bool _isHls(String url) => url.contains('.m3u8');
+
+  /// Where the subtitle for the video at [videoPath] is stored.
+  static String subtitlePathFor(String videoPath) =>
+      '${videoPath.replaceFirst(RegExp(r'\.[^./]+$'), '')}.vtt';
+
+  Future<void> _downloadHls({
+    required Download download,
+    required String url,
+    required String filePath,
+    required Map<String, String> headers,
+    required CancelToken cancelToken,
+  }) async {
+    var lastUpdate = DateTime.now();
+    await _hls.download(
+      playlistUrl: url,
+      outputPath: filePath,
+      headers: headers,
+      cancelToken: cancelToken,
+      onProgress: (done, total, bytes) {
+        final progress = done / total;
+        _progressControllers[download.id]?.add(progress);
+
+        final now = DateTime.now();
+        if (now.difference(lastUpdate).inSeconds >= 1) {
+          lastUpdate = now;
+          _storage.updateDownload(download.copyWith(
+            status: DownloadStatus.downloading,
+            downloadedBytes: bytes,
+            totalBytes: (bytes / progress).round(),
+          ));
+          _updateNotification(
+            download.id.hashCode,
+            download.animeTitle,
+            'Episode ${download.episodeNumber}',
+            progress,
+          );
+        }
+      },
+    );
+  }
+
+  /// Subtitles are optional: a failure here doesn't fail the download.
+  Future<void> _downloadSubtitle(
+      String url, String videoPath, Map<String, String> headers) async {
+    try {
+      await _dio.download(url, subtitlePathFor(videoPath),
+          options: Options(headers: headers));
+    } catch (e) {
+      debugPrint('Warning: Failed to download subtitles: $e');
+    }
+  }
+
+  /// HLS downloads can't resume by byte range and their stream URLs expire,
+  /// so resolve a fresh stream and download it again.
+  Future<void> _resumeHls(Download download) async {
+    final filePath = '${await _getDownloadPath()}/'
+        '${download.animeId}_ep${download.episodeNumber}_${download.quality}.mp4';
+    final cancelToken = CancelToken();
+    _cancelTokens[download.id] = cancelToken;
+
+    await _storage.updateDownload(download.copyWith(status: DownloadStatus.downloading));
+    if (!_progressControllers.containsKey(download.id) ||
+        _progressControllers[download.id]!.isClosed) {
+      _progressControllers[download.id] = StreamController<double>.broadcast();
+    }
+
+    try {
+      await _startForegroundService();
+
+      final result = await _animeApi.getEpisodeSources(
+        download.episodeId,
+        translationType: download.quality == 'dub' ? 'dub' : 'sub',
+      );
+      final sources = List<Map<String, dynamic>>.from(
+          (result?['sources'] as List?) ?? const []);
+      if (sources.isEmpty) {
+        throw StateError(_animeApi.lastSourceError ?? 'No sources found');
+      }
+
+      final source = sources.first;
+      final url = source['url'] as String;
+      final headers =
+          Map<String, String>.from((source['headers'] as Map?) ?? _defaultHeaders);
+      await _downloadHls(
+        download: download,
+        url: url,
+        filePath: filePath,
+        headers: headers,
+        cancelToken: cancelToken,
+      );
+
+      final subtitle = source['subtitle'] as String?;
+      if (subtitle != null) await _downloadSubtitle(subtitle, filePath, headers);
+
+      final size = await File(filePath).length();
+      await _storage.updateDownload(download.copyWith(
+        status: DownloadStatus.completed,
+        downloadUrl: url,
+        filePath: filePath,
+        downloadedBytes: size,
+        totalBytes: size,
+        completedAt: DateTime.now(),
+      ));
+      _progressBarCompletion(download.id, download.animeTitle, download.episodeNumber);
+    } catch (e) {
+      final cancelled = e is DioException && CancelToken.isCancel(e);
+      if (!cancelled) debugPrint('HLS download failed: $e');
+      await _storage.updateDownload(download.copyWith(
+          status: cancelled ? DownloadStatus.paused : DownloadStatus.failed));
+    } finally {
+      _cleanup(download.id);
+      await _stopForegroundService();
+    }
+  }
+
   void _progressBarCompletion(String downloadId, String title, int ep) {
       try {
         _progressControllers[downloadId]?.add(1.0);
@@ -701,6 +843,10 @@ class DownloadService {
       final file = File(download.filePath!);
       if (await file.exists()) {
         await file.delete();
+      }
+      final subtitle = File(subtitlePathFor(download.filePath!));
+      if (await subtitle.exists()) {
+        await subtitle.delete();
       }
     }
 

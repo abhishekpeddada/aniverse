@@ -474,6 +474,8 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
       try {
         String? downloadUrl;
         String quality = 'default'; // Use default quality
+        Map<String, String>? headers;
+        String? subtitleUrl;
 
         if (episode.id.startsWith('raiden_')) {
           final raidenData = ref.read(raidenAnimeDetailsProvider(episode.id));
@@ -497,23 +499,19 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                 .where((s) => !s['url'].toString().contains('.m3u8'))
                 .toList();
 
+            final Map<String, dynamic> source;
             if (nonM3u8Sources.isNotEmpty) {
-              downloadUrl = nonM3u8Sources.first['url'] as String?;
-              quality =
-                  nonM3u8Sources.first['quality']?.toString() ?? 'default';
+              source = nonM3u8Sources.first;
+              quality = source['quality']?.toString() ?? 'default';
             } else {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                        'Only streaming sources available - download may not work'),
-                    duration: Duration(seconds: 3),
-                  ),
-                );
-              }
-              downloadUrl = sourcesList[0]['url'] as String?;
-              quality = sourcesList[0]['quality']?.toString() ?? 'default';
+              // HLS streams are saved segment by segment. Label them by
+              // sub/dub so a resumed download fetches the same stream type.
+              source = sourcesList.first;
+              quality = translationType;
             }
+            downloadUrl = source['url'] as String?;
+            headers = (source['headers'] as Map?)?.cast<String, String>();
+            subtitleUrl = source['subtitle'] as String?;
           }
         }
 
@@ -546,6 +544,8 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
           episodeTitle: episode.title,
           downloadUrl: downloadUrl,
           quality: quality,
+          headers: headers,
+          subtitleUrl: subtitleUrl,
         );
       } catch (e) {
         if (context.mounted) {

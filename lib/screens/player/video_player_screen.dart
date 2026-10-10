@@ -14,6 +14,7 @@ import '../../providers/history_provider.dart';
 import '../../providers/storage_provider.dart';
 import '../../providers/raiden_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/download_service.dart';
 import '../../services/firestore_service.dart';
 import '../../models/watch_history_model.dart';
 import 'widgets/quality_selector.dart';
@@ -54,6 +55,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   // Source & Quality State
   List<Map<String, dynamic>> _availableSources = [];
   int _currentSourceIndex = 0;
+
+  /// Each attempt to open a source gets a number, so the burst of errors
+  /// mpv can log for one failure only counts as one failure.
+  int _sourceAttempt = 0;
+  int? _failedSourceAttempt;
+
+  /// One extra pass over the sources before reporting that all failed:
+  /// a stream that errors on first open often plays on the next try.
+  bool _retriedSources = false;
   String _translationType = 'sub'; // 'sub' or 'dub'
 
   // Gesture State
@@ -556,6 +566,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
         await player.open(Media(widget.offlineFilePath!));
 
+        final subtitlePath =
+            DownloadService.subtitlePathFor(widget.offlineFilePath!);
+        if (await File(subtitlePath).exists()) {
+          await player.setSubtitleTrack(
+              SubtitleTrack.uri(subtitlePath, title: 'English', language: 'en'));
+        }
+
         setState(() {
           isInitialized = true;
         });
@@ -648,6 +665,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   };
 
   Future<void> _playCurrentSource() async {
+    _sourceAttempt++;
     if (_currentSourceIndex >= _availableSources.length) {
       setState(() {
         hasError = true;
@@ -823,10 +841,20 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   }
 
   void _playNextSource() {
+    if (_failedSourceAttempt == _sourceAttempt) return;
+    _failedSourceAttempt = _sourceAttempt;
+
     debugPrint('⚠️ Source $_currentSourceIndex failed, trying next...');
     if (_currentSourceIndex + 1 < _availableSources.length) {
       _currentSourceIndex++;
       _playCurrentSource();
+    } else if (!_retriedSources && _availableSources.isNotEmpty) {
+      debugPrint('🔁 All sources failed once, retrying from the first');
+      _retriedSources = true;
+      _currentSourceIndex = 0;
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) _playCurrentSource();
+      });
     } else {
       player.stop(); // Stop playback to prevent audio ghosting
       setState(() {
@@ -867,6 +895,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     player.stream.error.listen((error) {
       debugPrint('❌ Player error: $error');
 
+      // A subtitle that fails to load doesn't stop the video from playing.
+      if (error.contains('external file') || error.contains('.vtt')) {
+        debugPrint('⚠️ Ignoring subtitle load error');
+        return;
+      }
+
       // If we haven't played successfully yet, assume source is bad and switch
       if (!_hasPlayedSuccessfully) {
         debugPrint('⚠️ Source failed at start, switching...');
@@ -906,6 +940,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     setState(() {
       _translationType = newType;
       _currentSourceIndex = 0; // Reset to first source
+      _retriedSources = false;
       isInitialized = false;
     });
 

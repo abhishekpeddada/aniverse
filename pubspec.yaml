@@ -58,6 +58,7 @@ dependencies:
   tflite_flutter: ^0.12.1
   cronet_http: ^1.10.0
   http: ^1.6.0
+  pointycastle: ^4.0.0
 
 dev_dependencies:
   flutter_test:
