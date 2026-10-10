@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - ccr-5db67aa9-m80746
+    paths-ignore:
+      - .github/workflows/release-apk.yml
 
 permissions:
   contents: read

@@ -1,0 +1,59 @@
+name: Release APK
+
+# Publishes an APK that an earlier "Build APK" run already produced, without
+# rebuilding it. Runs when this file changes; update SOURCE_RUN_ID, TAG and
+# TARGET_SHA to release a different build.
+on:
+  push:
+    branches:
+      - ccr-5db67aa9-m80746
+    paths:
+      - .github/workflows/release-apk.yml
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  SOURCE_RUN_ID: '38053252310'
+  TAG: v1.4.0
+  TARGET_SHA: 8e6901595b28f53d486873bf7d7c0a00c36273c0
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK from the build run
+        uses: actions/download-artifact@v4
+        with:
+          name: aniverse-release-apk
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: apk
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd apk
+          sha256sum app-release.apk > app-release.apk.sha256
+          cat > notes.md <<'NOTES'
+          ## What's changed
+
+          - **Playback works again.** AllAnime's stream endpoint stopped working, so episodes now stream from hianime, the provider ani-cli uses. Search, lists and details still come from AllAnime.
+          - **English subtitles** load reliably on every play.
+          - **Downloads work again**, including HLS streams, and subtitles are saved with each download for offline viewing.
+          - **Fewer failed starts:** playback retries automatically when a stream fails on first open.
+          - **Google sign-in** works with the new release signing key.
+
+          ## Notes
+
+          - This build is signed with a new release key. If installing over an older version fails, uninstall it first. Watch history stored on the device will be lost.
+          - The version shown inside the app is still 1.3.0.
+          - Adult titles from the Raiden source may not load.
+          NOTES
+          gh release create "$TAG" app-release.apk app-release.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "AniVerse $TAG" \
+            --notes-file notes.md
