@@ -9,6 +9,7 @@ import '../../providers/download_provider.dart';
 import '../../models/episode_model.dart';
 import '../../models/anime_model.dart';
 import '../../models/download_model.dart';
+import '../../services/raiden_api_service.dart';
 import '../player/video_player_screen.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 
@@ -481,6 +482,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
           final raidenData = ref.read(raidenAnimeDetailsProvider(episode.id));
           if (raidenData != null && raidenData['download_url'] != null) {
             downloadUrl = raidenData['download_url'] as String;
+            headers = RaidenApiService.streamHeaders;
           }
         } else {
           final sources = await ref.read(episodeSourcesWithTypeProvider((

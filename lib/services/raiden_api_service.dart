@@ -2,8 +2,19 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 class RaidenApiService {
-  final Dio _dio = Dio();
+  // Without timeouts one unresponsive page stalls the whole list.
+  final Dio _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 15),
+    receiveTimeout: const Duration(seconds: 20),
+  ));
   static const String _baseUrl = 'https://api.raiden.ovh';
+
+  /// Headers for playing and downloading Raiden videos. They are direct file
+  /// links, so no Referer is sent for hotlink protection to reject.
+  static const Map<String, String> streamHeaders = {
+    'User-Agent':
+        'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+  };
 
   /// Fetch adult anime list from Raiden API
   /// Returns list of anime with title, thumbnail, and download URL
@@ -23,39 +34,11 @@ class RaidenApiService {
         if (results != null && results.isNotEmpty) {
           debugPrint('✅ Fetched ${results.length} adult anime from Raiden');
           
-          final List<Map<String, dynamic>> processedResults = [];
-          
-          for (var item in results) {
-            final anime = item as Map<String, dynamic>;
-            final pageUrl = anime['page_url'] as String?;
-            
-            if (pageUrl != null) {
-              try {
-                final videoUrl = await _scrapeVideoUrl(pageUrl);
-                if (videoUrl != null) {
-                  anime['download_url'] = videoUrl;
-                  processedResults.add(anime);
-                  debugPrint('✅ Scraped URL from $pageUrl');
-                } else {
-                  debugPrint('⚠️ Failed to scrape URL from $pageUrl');
-                  if (anime['download_url'] != null) {
-                    anime['download_url'] = (anime['download_url'] as String)
-                        .replaceAll('hanime.city', 'rule34.city');
-                    processedResults.add(anime);
-                  }
-                }
-              } catch (e) {
-                debugPrint('⚠️ Error scraping $pageUrl: $e');
-                if (anime['download_url'] != null) {
-                  anime['download_url'] = (anime['download_url'] as String)
-                      .replaceAll('hanime.city', 'rule34.city');
-                  processedResults.add(anime);
-                }
-              }
-            }
-          }
-          
-          return processedResults;
+          // Scrape every page at once rather than one after another.
+          final processed = await Future.wait(
+            results.map((item) => _withVideoUrl(item as Map<String, dynamic>)),
+          );
+          return processed.whereType<Map<String, dynamic>>().toList();
         }
       }
       
@@ -104,6 +87,25 @@ class RaidenApiService {
            url.contains('hanimes.org') || 
            url.contains('rule34.city') || 
            url.contains('rule34video.city');
+  }
+
+  /// Fills in the scraped video URL, falling back to the API's own link with
+  /// the domain fix. Returns null when there's no usable link.
+  Future<Map<String, dynamic>?> _withVideoUrl(Map<String, dynamic> anime) async {
+    final pageUrl = anime['page_url'] as String?;
+    if (pageUrl == null) return null;
+
+    final videoUrl = await _scrapeVideoUrl(pageUrl);
+    if (videoUrl != null) {
+      anime['download_url'] = videoUrl;
+      return anime;
+    }
+
+    debugPrint('⚠️ Failed to scrape URL from $pageUrl');
+    final apiUrl = anime['download_url'] as String?;
+    if (apiUrl == null) return null;
+    anime['download_url'] = getVideoSource(apiUrl);
+    return anime;
   }
 
   Future<String?> _scrapeVideoUrl(String pageUrl) async {

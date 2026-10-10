@@ -197,22 +197,31 @@ final episodeSourcesWithTypeProvider = FutureProvider.family<
       debugPrint('   Primary: $primaryUrl');
       debugPrint('   Fallback: $fallbackUrl');
 
-      // Return in the format expected by video player
+      // Return in the format expected by video player. Raiden links are
+      // direct files, so send no Referer that hotlink protection could reject.
       return {
         'sources': [
           {
             'url': primaryUrl,
             'quality': 'Primary Server',
             'isM3U8': false,
+            'headers': RaidenApiService.streamHeaders,
           },
           {
             'url': fallbackUrl,
             'quality': 'Fallback Server',
             'isM3U8': false,
+            'headers': RaidenApiService.streamHeaders,
           }
         ]
       };
     }
+
+    // Without cached Raiden data there's nothing to play, and the id isn't
+    // an AllAnime episode, so don't fall through to the regular lookup.
+    ref.read(animeApiServiceProvider).lastSourceError =
+        'This title\'s video link is no longer cached. Open it again from the Hentai list.';
+    return null;
   }
 
   final apiService = ref.watch(animeApiServiceProvider);
