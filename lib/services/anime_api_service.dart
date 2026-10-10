@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import '../core/constants/api_constants.dart';
 import '../models/anime_model.dart';
 import '../models/episode_model.dart';
+import 'allanime_crypto.dart';
 
 class AnimeApiService {
   final Dio _dio = Dio(BaseOptions(
@@ -18,6 +19,8 @@ class AnimeApiService {
             'User-Agent': ApiConstants.userAgent,
           },
   ));
+
+  late final AllAnimeCrypto _crypto = AllAnimeCrypto(_dio);
 
   AnimeApiService() {
     if (kDebugMode) {
@@ -189,78 +192,172 @@ class AnimeApiService {
       final showId = parts[0];
       final episodeString = parts.sublist(1).join('-');
 
-      const sourceQuery = r'''
-        query($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
-          episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) {
-            episodeString
-            sourceUrls
-          }
-        }
-      ''';
-
       final variables = {
         'showId': showId,
         'translationType': translationType,
         'episodeString': episodeString,
       };
+      final extensions = {
+        'persistedQuery': {
+          'version': 1,
+          'sha256Hash': ApiConstants.sourceQueryHash,
+        },
+        'aaReq': await _crypto.buildAaReq(ApiConstants.sourceQueryHash),
+      };
 
-      final response = await _dio.post(
+      final response = await _dio.get(
         ApiConstants.apiPath,
-        data: {
-          'variables': variables,
-          'query': sourceQuery,
+        queryParameters: {
+          'variables': jsonEncode(variables),
+          'extensions': jsonEncode(extensions),
         },
       );
 
       debugPrint('✅ Episode sources response: ${response.statusCode}');
 
-      if (response.data != null && response.data['data'] != null) {
-        final episode = response.data['data']['episode'];
-        final sourceUrls = episode['sourceUrls'] as List?;
+      final body = _asJsonMap(response.data)?['data'];
+      Map<String, dynamic>? episode;
+      if (body is Map && body['tobeparsed'] is String) {
+        final clear = await _crypto.decryptTobeParsed(body['tobeparsed'] as String);
+        final decoded = _asJsonMap(clear);
+        episode = _asJsonMap(decoded?['data'] ?? decoded)?['episode'] as Map<String, dynamic>?;
+      } else if (body is Map) {
+        episode = body['episode'] as Map<String, dynamic>?;
+      }
 
-        if (sourceUrls != null && sourceUrls.isNotEmpty) {
-          final sources = <Map<String, dynamic>>[];
+      final sourceUrls = episode?['sourceUrls'] as List?;
+      if (sourceUrls == null || sourceUrls.isEmpty) return null;
 
-          for (var source in sourceUrls) {
-            final sourceUrl = source['sourceUrl'] as String?;
-            final sourceName = source['sourceName'] as String?;
-            final sourceType = source['type'] as String?;
-            final priority = source['priority'] as num?;
+      final sources = <Map<String, dynamic>>[];
+      for (final source in sourceUrls) {
+        final sourceUrl = source['sourceUrl'] as String?;
+        final sourceName = source['sourceName'] as String?;
+        final sourceType = source['type'] as String?;
+        final priority = source['priority'] as num? ?? 0;
 
-            if (sourceUrl != null && sourceType != 'iframe') {
-              final decodedUrl = _decodeAllAnimeUrl(sourceUrl);
-              if (decodedUrl != null && decodedUrl.isNotEmpty) {
-                debugPrint('📺 Source: $sourceName ($priority) - ${decodedUrl.substring(0, decodedUrl.length > 50 ? 50 : decodedUrl.length)}...');
-                sources.add({
-                  'url': decodedUrl,
-                  'quality': _extractQuality(sourceName, decodedUrl),
-                  'isM3U8': decodedUrl.contains('.m3u8'),
-                  'sourceName': sourceName ?? 'Unknown',
-                  'priority': priority ?? 0,
-                });
-              }
-            }
-          }
+        if (sourceUrl == null || sourceType == 'iframe') continue;
 
-          sources.sort((a, b) => (b['priority'] as num).compareTo(a['priority'] as num));
+        final decodedUrl = _decodeAllAnimeUrl(sourceUrl);
+        if (decodedUrl == null || decodedUrl.isEmpty) continue;
 
-          if (sources.isNotEmpty) {
-            debugPrint('✅ Found ${sources.length} video sources');
-          }
-
-          return {
-            'sources': sources,
-            'translationType': translationType,
-          };
+        if (decodedUrl.startsWith('/')) {
+          // Provider path: resolve it on the AllAnime provider host.
+          sources.addAll(await _resolveProviderLinks(decodedUrl, sourceName, priority));
+        } else {
+          sources.add(_sourceEntry(
+            decodedUrl,
+            _extractQuality(sourceName, decodedUrl),
+            sourceName,
+            priority,
+          ));
         }
       }
 
-      return null;
+      sources.sort((a, b) => (b['priority'] as num).compareTo(a['priority'] as num));
+
+      if (sources.isNotEmpty) {
+        debugPrint('✅ Found ${sources.length} video sources');
+      }
+
+      return {
+        'sources': sources,
+        'translationType': translationType,
+      };
     } catch (e, stackTrace) {
       debugPrint('❌ Error getting episode sources: $e');
       debugPrint('📍 Stack trace: $stackTrace');
       return null;
     }
+  }
+
+  Map<String, dynamic>? _asJsonMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is String) {
+      final decoded = jsonDecode(value);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _sourceEntry(
+    String url,
+    String quality,
+    String? sourceName,
+    num priority,
+  ) {
+    return {
+      'url': url,
+      'quality': quality,
+      'isM3U8': url.contains('.m3u8'),
+      'sourceName': sourceName ?? 'Unknown',
+      'priority': priority,
+    };
+  }
+
+  /// Resolves an AllAnime provider path (ani-cli's `get_links`) into playable
+  /// links: one per resolution for MP4 providers, plus HLS master playlists.
+  Future<List<Map<String, dynamic>>> _resolveProviderLinks(
+    String path,
+    String? sourceName,
+    num priority,
+  ) async {
+    final results = <Map<String, dynamic>>[];
+    try {
+      final response = await _dio.get(
+        '${ApiConstants.providerBase}$path',
+        options: Options(headers: {'Referer': ApiConstants.referer}),
+      );
+      final json = response.data is String ? jsonDecode(response.data as String) : response.data;
+
+      void walk(dynamic node) {
+        if (node is Map) {
+          final link = node['link'];
+          final resolution = node['resolutionStr'];
+          if (link is String && resolution is String) {
+            for (final entry in _expandWixmp(link, resolution)) {
+              results.add(_sourceEntry(entry.url, entry.quality, sourceName, priority));
+            }
+          }
+
+          final hlsUrl = node['url'];
+          if (hlsUrl is String && node['hardsub_lang'] == 'en-US') {
+            results.add(_sourceEntry(hlsUrl, 'Auto', sourceName, priority));
+          }
+
+          node.values.forEach(walk);
+        } else if (node is List) {
+          node.forEach(walk);
+        }
+      }
+
+      walk(json);
+    } catch (e) {
+      debugPrint('⚠️ Provider $sourceName ($path) failed: $e');
+    }
+    return results;
+  }
+
+  /// Mirrors ani-cli's wixmp handling: strip the repackager wrapper and, when
+  /// the URL lists several qualities (`,480p,720p,/mp4`), emit one link each.
+  List<({String url, String quality})> _expandWixmp(String link, String resolution) {
+    final quality = RegExp(r'^\d+$').hasMatch(resolution) ? '${resolution}p' : resolution;
+    if (!link.contains('repackager.wixmp.com/')) {
+      return [(url: link, quality: quality)];
+    }
+
+    final extract = link
+        .replaceAll('repackager.wixmp.com/', '')
+        .replaceFirst(RegExp(r'\.urlset.*'), '');
+    final listed = RegExp(r'/,([^/]*),/mp4').firstMatch(link)?.group(1);
+    if (listed == null) return [(url: extract, quality: quality)];
+
+    return [
+      for (final q in listed.split(',').where((q) => q.isNotEmpty))
+        (
+          url: extract.replaceAll(RegExp(r',[^/]*'), q),
+          quality: RegExp(r'^\d+$').hasMatch(q) ? '${q}p' : q,
+        ),
+    ];
   }
 
   String _extractQuality(String? sourceName, String url) {
