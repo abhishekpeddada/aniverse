@@ -95,6 +95,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   // Controls visibility
   bool _showControls = true;
+
+  /// While locked, controls and gestures are disabled so the screen can be
+  /// touched without seeking or pausing; a tap only reveals the unlock button.
+  bool _controlsLocked = false;
+  bool _showUnlockButton = false;
+  Timer? _unlockButtonTimer;
   Timer? _hideControlsTimer;
 
   // Playback speed
@@ -144,6 +150,54 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         });
       }
     });
+  }
+
+  void _lockControls() {
+    _hideControlsTimer?.cancel();
+    setState(() {
+      _controlsLocked = true;
+      _showControls = false;
+    });
+    _flashUnlockButton();
+  }
+
+  void _unlockControls() {
+    _unlockButtonTimer?.cancel();
+    setState(() {
+      _controlsLocked = false;
+      _showUnlockButton = false;
+    });
+    _resetHideTimer();
+  }
+
+  void _flashUnlockButton() {
+    _unlockButtonTimer?.cancel();
+    setState(() => _showUnlockButton = true);
+    _unlockButtonTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showUnlockButton = false);
+    });
+  }
+
+  /// Seeks once the media has loaded. mpv drops a seek issued while a stream
+  /// is still opening, so streams restarted from the beginning even after
+  /// choosing Resume; local files load fast enough that it went unnoticed.
+  Future<void> _seekWhenReady(Duration target) async {
+    try {
+      if (player.state.duration == Duration.zero) {
+        await player.stream.duration
+            .firstWhere((d) => d > Duration.zero)
+            .timeout(const Duration(seconds: 30));
+      }
+    } on TimeoutException {
+      debugPrint('⚠️ Media not loaded after 30s, seeking anyway');
+    }
+    await player.seek(target);
+
+    // Some streams still ignore the first seek while buffering; retry once.
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    if ((player.state.position - target).abs() > const Duration(seconds: 5)) {
+      await player.seek(target);
+    }
   }
 
   void _toggleControls() {
@@ -614,7 +668,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                 ],
               ),
             );
-            if (resume) await player.seek(savedHistory.position);
+            if (resume) await _seekWhenReady(savedHistory.position);
           }
         }
 
@@ -785,6 +839,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         isInitialized = true;
       });
 
+      Duration? resumedFrom;
       if (savedHistory != null && savedHistory.position > const Duration(seconds: 5)) {
         // Show resume dialog
         if (mounted) {
@@ -822,16 +877,19 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           );
 
           if (resume) {
-            await player.seek(savedHistory.position);
+            await _seekWhenReady(savedHistory.position);
+            resumedFrom = savedHistory.position;
           }
         }
       }
 
       await player.play();
 
-      // Sync history immediately when playback starts
+      // Sync history immediately when playback starts. Use the resume point:
+      // the reported position can still be 0 while a stream loads, and saving
+      // that would overwrite where the user left off.
       _saveWatchHistory(
-          player.state.position, player.state.duration,
+          resumedFrom ?? player.state.position, player.state.duration,
           syncToCloud: true);
 
     } catch (e) {
@@ -1031,6 +1089,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _feedbackTimer?.cancel();
     _hideControlsTimer?.cancel();
+    _unlockButtonTimer?.cancel();
     _historySaveTimer?.cancel();
     _orientationSubscription?.cancel();
 
@@ -1119,6 +1178,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
                   // 2. Gesture Controls Overlay (volume, brightness, seek)
                   Positioned.fill(
+                    child: IgnorePointer(
+                    ignoring: _controlsLocked,
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
                       // Horizontal drag for seeking
@@ -1220,6 +1281,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                         }
                       },
                     ),
+                    ),
                   ),
 
                   // Feedback overlay for seek
@@ -1294,13 +1356,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
                   // 3. Modern Custom Controls Overlay
                   GestureDetector(
-                    onTap: _toggleControls,
+                    onTap: _controlsLocked ? _flashUnlockButton : _toggleControls,
                     behavior: HitTestBehavior.translucent,
                     child: AnimatedOpacity(
-                      opacity: _showControls ? 1.0 : 0.0,
+                      opacity: _showControls && !_controlsLocked ? 1.0 : 0.0,
                       duration: const Duration(milliseconds: 300),
                       child: IgnorePointer(
-                        ignoring: !_showControls,
+                        ignoring: !_showControls || _controlsLocked,
                         child: StreamBuilder<bool>(
                           stream: player.stream.playing,
                           builder: (context, playingSnapshot) {
@@ -1371,6 +1433,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                                                     overflow:
                                                         TextOverflow.ellipsis,
                                                   ),
+                                                ),
+                                                IconButton(
+                                                  tooltip: 'Lock controls',
+                                                  icon: const Icon(
+                                                      Icons.lock_open,
+                                                      color: Colors.white),
+                                                  onPressed: _lockControls,
                                                 ),
                                               ],
                                             ),
@@ -1630,6 +1699,25 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                       ),
                     ),
                   ),
+                  // 4. Unlock button, shown briefly on tap while locked
+                  if (_controlsLocked && _showUnlockButton)
+                    Positioned(
+                      left: 24,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: Material(
+                          color: Colors.black.withOpacity(0.6),
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            iconSize: 32,
+                            tooltip: 'Unlock controls',
+                            icon: const Icon(Icons.lock, color: Colors.white),
+                            onPressed: _unlockControls,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               )
             : Center(
