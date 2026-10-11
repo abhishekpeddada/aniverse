@@ -156,6 +156,24 @@ final animeDetailsProvider =
   return await apiService.getAnimeInfo(animeId);
 });
 
+/// An anime shown in a saved list (favorites, watchlist). Uses the local
+/// cache, and fetches and caches the details when they're missing, e.g. when
+/// the lists were restored from the cloud after a reinstall.
+final listAnimeProvider =
+    FutureProvider.family<Anime, String>((ref, animeId) async {
+  final storage = ref.read(storageServiceProvider);
+  final cached = storage.getCachedAnime(animeId);
+  if (cached != null) return cached;
+
+  final details = await ref.read(animeDetailsProvider(animeId).future);
+  final anime = details?['anime'];
+  if (anime is Anime) {
+    await storage.cacheAnime(anime);
+    return anime;
+  }
+  return Anime(id: animeId, title: 'Unavailable');
+});
+
 // Episode Sources Provider (legacy - uses 'sub' by default)
 final episodeSourcesProvider =
     FutureProvider.family<Map<String, dynamic>?, String>(

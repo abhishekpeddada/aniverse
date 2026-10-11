@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/lists_provider.dart';
-import '../../providers/storage_provider.dart';
+import '../../providers/anime_provider.dart';
 import '../../models/anime_model.dart';
 import '../search/widgets/anime_grid.dart';
 
@@ -11,7 +11,6 @@ class FavoritesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final favoritesIds = ref.watch(favoritesProvider);
-    final storageService = ref.watch(storageServiceProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -36,22 +35,13 @@ class FavoritesScreen extends ConsumerWidget {
                 ],
               ),
             )
-          : FutureBuilder<List<Anime?>>(
-              future: Future.wait<Anime?>(
-                favoritesIds.map((id) async {
-                  final cached = storageService.getCachedAnime(id);
-                  if (cached != null) return cached;
-                  return Anime(id: id, title: 'Loading...');
-                }).toList(),
-              ),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                
-                final animes = snapshot.data?.whereType<Anime>().toList() ?? [];
-                return AnimeGrid(animes: animes);
-              },
+          : AnimeGrid(
+              // Each card fills in as its details load from the cache or API.
+              animes: [
+                for (final id in favoritesIds)
+                  ref.watch(listAnimeProvider(id)).valueOrNull ??
+                      Anime(id: id, title: 'Loading...'),
+              ],
             ),
     );
   }
