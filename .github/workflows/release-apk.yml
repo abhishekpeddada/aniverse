@@ -18,8 +18,8 @@ permissions:
   actions: read
 
 env:
-  SOURCE_RUN_ID: '38053252310'
-  TAG: v1.4.0
+  SOURCE_RUN_ID: '38123821323'
+  TAG: v1.4.1
 
 jobs:
   release:
@@ -46,17 +46,16 @@ jobs:
           cat > notes.md <<'NOTES'
           ## What's changed
 
-          - **Playback works again.** AllAnime's stream endpoint stopped working, so episodes now stream from hianime, the provider ani-cli uses. Search, lists and details still come from AllAnime.
-          - **English subtitles** load reliably on every play.
-          - **Downloads work again**, including HLS streams, and subtitles are saved with each download for offline viewing.
-          - **Fewer failed starts:** playback retries automatically when a stream fails on first open.
-          - **Google sign-in** works with the new release signing key.
+          - **Resume works when streaming.** Choosing Resume now continues where you stopped, and the resume point is no longer reset to the start.
+          - **Lock controls:** tap the lock icon in the player's top bar to disable controls and gestures. Tap the screen to show the unlock button.
+          - **Faster downloads:** episode segments download in parallel.
+          - **Favorites and Watchlist** load their titles and images again after a reinstall, instead of staying on "Loading...".
+          - **Adult (Raiden) titles** no longer send the AllAnime referer, and the list loads faster with request timeouts.
 
           ## Notes
 
-          - This build is signed with a new release key. If installing over an older version fails, uninstall it first. Watch history stored on the device will be lost.
+          - Signed with the same key as v1.4.0, so it installs over it directly.
           - The version shown inside the app is still 1.3.0.
-          - Adult titles from the Raiden source may not load.
           NOTES
           gh release upload "$TAG" app-release.apk app-release.apk.sha256 \
             --repo "$GITHUB_REPOSITORY" --clobber
