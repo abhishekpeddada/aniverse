@@ -26,7 +26,9 @@ class NotificationSettingsNotifier extends StateNotifier<NotificationSettings> {
     // Start or stop the background check now instead of on the next launch.
     // The first check only records the current episode counts.
     if (value) {
-      await NotificationService().requestPermissions();
+      final notifications = NotificationService();
+      await notifications.requestPermissions();
+      await notifications.requestBatteryOptimizationExemption();
       await BackgroundEpisodeChecker.registerBackgroundTask();
       await BackgroundEpisodeChecker.runImmediateCheck();
     } else {

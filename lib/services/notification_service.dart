@@ -108,6 +108,16 @@ class NotificationService {
     return true;
   }
 
+  /// Asks Android to exempt the app from battery optimization, so the
+  /// background episode check isn't deferred or skipped while the app is
+  /// closed. Shows the system dialog only when not already exempt.
+  Future<bool> requestBatteryOptimizationExemption() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.ignoreBatteryOptimizations.isGranted) return true;
+    final status = await Permission.ignoreBatteryOptimizations.request();
+    return status.isGranted;
+  }
+
   Future<void> showNotification({
     required String title,
     required String body,
