@@ -182,6 +182,29 @@ class AnimeApiService {
     }
   }
 
+  /// The number of subbed episodes out (dubbed when there's no sub), or null
+  /// when the lookup fails, so a failed request isn't mistaken for zero.
+  Future<int?> getEpisodeCount(String showId) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.apiPath,
+        data: {
+          'variables': {'showId': showId},
+          'query': r'query($showId: String!) { show(_id: $showId) { availableEpisodes } }',
+        },
+      );
+      final episodes = response.data?['data']?['show']?['availableEpisodes'];
+      if (episodes is! Map) return null;
+      final sub = episodes['sub'];
+      final dub = episodes['dub'];
+      if (sub is int && sub > 0) return sub;
+      return dub is int ? dub : null;
+    } catch (e) {
+      debugPrint('❌ Error getting episode count for $showId: $e');
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> getEpisodeSources(
     String episodeId, {
     String translationType = 'sub', // 'sub' or 'dub'

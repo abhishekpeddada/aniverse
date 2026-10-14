@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/notification_settings_model.dart';
+import '../services/background_episode_checker.dart';
 import '../services/notification_storage.dart';
 import '../services/notification_service.dart';
 
@@ -21,6 +22,16 @@ class NotificationSettingsNotifier extends StateNotifier<NotificationSettings> {
   Future<void> toggleNewEpisodeAlerts(bool value) async {
     final newSettings = state.copyWith(newEpisodeAlerts: value);
     await updateSettings(newSettings);
+
+    // Start or stop the background check now instead of on the next launch.
+    // The first check only records the current episode counts.
+    if (value) {
+      await NotificationService().requestPermissions();
+      await BackgroundEpisodeChecker.registerBackgroundTask();
+      await BackgroundEpisodeChecker.runImmediateCheck();
+    } else {
+      await BackgroundEpisodeChecker.cancelBackgroundTask();
+    }
   }
 
   Future<void> toggleWatchReminders(bool value) async {

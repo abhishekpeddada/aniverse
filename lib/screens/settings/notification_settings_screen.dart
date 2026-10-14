@@ -26,7 +26,7 @@ class NotificationSettingsScreen extends ConsumerWidget {
           SwitchListTile(
             title: const Text('New Episode Alerts'),
             subtitle:
-                const Text('Notify when watchlist anime get new episodes'),
+                const Text('Notify when favorites, watchlist or recently watched anime get new episodes'),
             value: settings.newEpisodeAlerts,
             onChanged: (value) {
               ref

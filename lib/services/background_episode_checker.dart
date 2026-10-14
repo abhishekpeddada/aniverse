@@ -21,8 +21,8 @@ class BackgroundEpisodeChecker {
   static Future<void> registerBackgroundTask() async {
     if (kIsWeb || !Platform.isAndroid) return;
 
-    await cancelBackgroundTask();
-
+    // Keep an existing schedule: cancelling and re-registering on every app
+    // launch restarted the hourly timer each time the app was opened.
     await Workmanager().registerPeriodicTask(
       episodeCheckTask,
       episodeCheckTask,
@@ -31,7 +31,7 @@ class BackgroundEpisodeChecker {
         networkType: NetworkType.connected,
         requiresBatteryNotLow: true,
       ),
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       backoffPolicy: BackoffPolicy.linear,
       backoffPolicyDelay: const Duration(minutes: 15),
     );
