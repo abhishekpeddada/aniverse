@@ -31,6 +31,10 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
   /// Episodes whose download was requested and is still being set up or
   /// running; their button shows progress instead of a snackbar.
   final Set<String> _preparingDownloads = {};
+
+  /// Episodes waiting their turn in a "download all" batch.
+  final Set<String> _queuedDownloads = {};
+  bool _downloadingAll = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -213,12 +217,37 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                         ),
                         const SizedBox(height: 24),
                       ],
-                      const Text(
-                        'Episodes',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Episodes',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          if (_downloadingAll)
+                            const SizedBox(
+                              width: 48,
+                              height: 48,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                                ),
+                              ),
+                            )
+                          else
+                            IconButton(
+                              tooltip: 'Download all episodes',
+                              icon: const Icon(Icons.download_for_offline_outlined),
+                              onPressed: () =>
+                                  _downloadAll(context, episodes, anime),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 12),
                       // Episode Search
@@ -304,6 +333,18 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                                 // download, or a spinner until its size is known.
                                 final active = ref.watch(activeDownloadProvider(
                                     (animeId: widget.animeId, episodeNumber: episode.number)));
+                                if (!isDownloaded &&
+                                    active == null &&
+                                    _queuedDownloads.contains(episode.id)) {
+                                  return const SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Center(
+                                      child: Icon(Icons.hourglass_empty,
+                                          size: 22, color: Colors.grey),
+                                    ),
+                                  );
+                                }
                                 if (!isDownloaded &&
                                     (active != null ||
                                         _preparingDownloads.contains(episode.id))) {
@@ -465,16 +506,12 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
     );
   }
 
-  Future<void> _showDownloadDialog(
-    BuildContext context,
-    WidgetRef ref,
-    Episode episode,
-    Anime anime,
-  ) async {
-    final translationType = await showDialog<String>(
+  Future<String?> _pickTranslationType(BuildContext context,
+      {String title = 'Select Audio'}) {
+    return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Select Audio'),
+        title: Text(title),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -492,87 +529,166 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
         ),
       ),
     );
+  }
 
-    if (translationType != null && context.mounted) {
-      final downloadService = ref.read(downloadServiceProvider);
-      setState(() => _preparingDownloads.add(episode.id));
+  Future<void> _showDownloadDialog(
+    BuildContext context,
+    WidgetRef ref,
+    Episode episode,
+    Anime anime,
+  ) async {
+    final translationType = await _pickTranslationType(context);
+    if (translationType == null || !context.mounted) return;
 
-      try {
-        String? downloadUrl;
-        String quality = 'default'; // Use default quality
-        Map<String, String>? headers;
-        String? subtitleUrl;
+    final error = await _downloadEpisode(
+      ProviderScope.containerOf(context, listen: false),
+      episode,
+      anime,
+      translationType,
+    );
+    if (error != null && context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
 
-        if (episode.id.startsWith('raiden_')) {
-          final raidenData = ref.read(raidenAnimeDetailsProvider(episode.id));
-          if (raidenData != null && raidenData['download_url'] != null) {
-            downloadUrl = raidenData['download_url'] as String;
-            headers = RaidenApiService.streamHeaders;
-          }
-        } else {
-          final sources = await ref.read(episodeSourcesWithTypeProvider((
-            episodeId: episode.id,
-            translationType: translationType, // Use selected type
-          )).future);
+  /// Downloads every episode that isn't downloaded or downloading yet, one
+  /// at a time, with a single sub/dub choice. Failures are reported once at
+  /// the end rather than per episode.
+  Future<void> _downloadAll(
+    BuildContext context,
+    List<Episode> episodes,
+    Anime anime,
+  ) async {
+    // The app-wide container outlives this screen, so the batch keeps going
+    // if the user navigates away.
+    final container = ProviderScope.containerOf(context, listen: false);
+    final pending = episodes.where((e) {
+      final key = (animeId: widget.animeId, episodeNumber: e.number);
+      return !container.read(isEpisodeDownloadedProvider(e.id)) &&
+          container.read(downloadByAnimeAndEpisodeProvider(key)) == null &&
+          container.read(activeDownloadProvider(key)) == null &&
+          !_preparingDownloads.contains(e.id);
+    }).toList();
 
-          if (sources != null &&
-              sources['sources'] != null &&
-              (sources['sources'] as List).isNotEmpty) {
-            final sourcesList =
-                List<Map<String, dynamic>>.from(sources['sources'] as List);
+    if (pending.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('All episodes are already downloaded'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
 
-            // Prefer non-M3U8 sources, otherwise use first available
-            var nonM3u8Sources = sourcesList
-                .where((s) => !s['url'].toString().contains('.m3u8'))
-                .toList();
+    final translationType = await _pickTranslationType(
+      context,
+      title: 'Download ${pending.length} episode${pending.length == 1 ? '' : 's'}',
+    );
+    if (translationType == null || !mounted) return;
 
-            final Map<String, dynamic> source;
-            if (nonM3u8Sources.isNotEmpty) {
-              source = nonM3u8Sources.first;
-              quality = source['quality']?.toString() ?? 'default';
-            } else {
-              // HLS streams are saved segment by segment. Label them by
-              // sub/dub so a resumed download fetches the same stream type.
-              source = sourcesList.first;
-              quality = translationType;
-            }
-            downloadUrl = source['url'] as String?;
-            headers = (source['headers'] as Map?)?.cast<String, String>();
-            subtitleUrl = source['subtitle'] as String?;
-          }
-        }
+    setState(() {
+      _downloadingAll = true;
+      _queuedDownloads.addAll(pending.map((e) => e.id));
+    });
 
-        if (downloadUrl == null) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('No video URL available for download')),
-            );
-          }
-          return;
-        }
-
-        await downloadService.startDownload(
-          animeId: widget.animeId,
-          animeTitle: anime.title,
-          animeImage: anime.image,
-          episodeId: episode.id,
-          episodeNumber: episode.number,
-          episodeTitle: episode.title,
-          downloadUrl: downloadUrl,
-          quality: quality,
-          headers: headers,
-          subtitleUrl: subtitleUrl,
-        );
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Download failed: $e')),
-          );
-        }
-      } finally {
-        if (mounted) setState(() => _preparingDownloads.remove(episode.id));
+    final failed = <int>[];
+    try {
+      for (final episode in pending) {
+        if (mounted) setState(() => _queuedDownloads.remove(episode.id));
+        final error =
+            await _downloadEpisode(container, episode, anime, translationType);
+        if (error != null) failed.add(episode.number);
       }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _downloadingAll = false;
+          _queuedDownloads.clear();
+        });
+      }
+    }
+
+    if (failed.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(
+        content: Text('Couldn\'t download episode${failed.length == 1 ? '' : 's'} '
+            '${failed.join(', ')}'),
+      ));
+    }
+  }
+
+  /// Downloads one episode and returns an error message, or null on success.
+  Future<String?> _downloadEpisode(
+    ProviderContainer container,
+    Episode episode,
+    Anime anime,
+    String translationType,
+  ) async {
+    final downloadService = container.read(downloadServiceProvider);
+    if (mounted) setState(() => _preparingDownloads.add(episode.id));
+
+    try {
+      String? downloadUrl;
+      String quality = 'default'; // Use default quality
+      Map<String, String>? headers;
+      String? subtitleUrl;
+
+      if (episode.id.startsWith('raiden_')) {
+        final raidenData = container.read(raidenAnimeDetailsProvider(episode.id));
+        if (raidenData != null && raidenData['download_url'] != null) {
+          downloadUrl = raidenData['download_url'] as String;
+          headers = RaidenApiService.streamHeaders;
+        }
+      } else {
+        final sources = await container.read(episodeSourcesWithTypeProvider((
+          episodeId: episode.id,
+          translationType: translationType, // Use selected type
+        )).future);
+
+        if (sources != null &&
+            sources['sources'] != null &&
+            (sources['sources'] as List).isNotEmpty) {
+          final sourcesList =
+              List<Map<String, dynamic>>.from(sources['sources'] as List);
+
+          // Prefer non-M3U8 sources, otherwise use first available
+          var nonM3u8Sources = sourcesList
+              .where((s) => !s['url'].toString().contains('.m3u8'))
+              .toList();
+
+          final Map<String, dynamic> source;
+          if (nonM3u8Sources.isNotEmpty) {
+            source = nonM3u8Sources.first;
+            quality = source['quality']?.toString() ?? 'default';
+          } else {
+            // HLS streams are saved segment by segment. Label them by
+            // sub/dub so a resumed download fetches the same stream type.
+            source = sourcesList.first;
+            quality = translationType;
+          }
+          downloadUrl = source['url'] as String?;
+          headers = (source['headers'] as Map?)?.cast<String, String>();
+          subtitleUrl = source['subtitle'] as String?;
+        }
+      }
+
+      if (downloadUrl == null) return 'No video URL available for download';
+
+      await downloadService.startDownload(
+        animeId: widget.animeId,
+        animeTitle: anime.title,
+        animeImage: anime.image,
+        episodeId: episode.id,
+        episodeNumber: episode.number,
+        episodeTitle: episode.title,
+        downloadUrl: downloadUrl,
+        quality: quality,
+        headers: headers,
+        subtitleUrl: subtitleUrl,
+      );
+      return null;
+    } catch (e) {
+      return 'Download failed: $e';
+    } finally {
+      if (mounted) setState(() => _preparingDownloads.remove(episode.id));
     }
   }
 
