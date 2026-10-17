@@ -28,6 +28,9 @@ class AnimeDetailsScreen extends ConsumerStatefulWidget {
 }
 
 class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
+  /// Episodes whose download was requested and is still being set up or
+  /// running; their button shows progress instead of a snackbar.
+  final Set<String> _preparingDownloads = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -296,6 +299,34 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                                 ) != null;
                                 final isDownloaded = isDownloadedById || isDownloadedByDetails;
 
+                                // While fetching the link or downloading, show progress
+                                // in place of the button: a ring filling with the
+                                // download, or a spinner until its size is known.
+                                final active = ref.watch(activeDownloadProvider(
+                                    (animeId: widget.animeId, episodeNumber: episode.number)));
+                                if (!isDownloaded &&
+                                    (active != null ||
+                                        _preparingDownloads.contains(episode.id))) {
+                                  final progress = active != null && active.totalBytes > 0
+                                      ? (active.downloadedBytes / active.totalBytes)
+                                          .clamp(0.0, 1.0)
+                                      : null;
+                                  return SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          value: progress,
+                                          strokeWidth: 2.5,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
                                 return IconButton(
                                   icon: Icon(
                                     isDownloaded
@@ -464,13 +495,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
 
     if (translationType != null && context.mounted) {
       final downloadService = ref.read(downloadServiceProvider);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Fetching video URL...'),
-          duration: Duration(seconds: 2),
-        ),
-      );
+      setState(() => _preparingDownloads.add(episode.id));
 
       try {
         String? downloadUrl;
@@ -527,16 +552,6 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
           return;
         }
 
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content:
-                  Text('Download started! (${translationType.toUpperCase()})'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-
         await downloadService.startDownload(
           animeId: widget.animeId,
           animeTitle: anime.title,
@@ -555,6 +570,8 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
             SnackBar(content: Text('Download failed: $e')),
           );
         }
+      } finally {
+        if (mounted) setState(() => _preparingDownloads.remove(episode.id));
       }
     }
   }

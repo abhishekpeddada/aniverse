@@ -90,6 +90,22 @@ final downloadByEpisodeProvider =
   }
 });
 
+/// The episode's download while it's queued or downloading, for showing
+/// progress in place of the download button.
+final activeDownloadProvider =
+    Provider.family<Download?, ({String animeId, int episodeNumber})>((ref, args) {
+  final downloads = ref.watch(downloadsProvider).value ?? [];
+  for (final d in downloads) {
+    if (d.animeId == args.animeId &&
+        d.episodeNumber == args.episodeNumber &&
+        (d.status == DownloadStatus.downloading ||
+            d.status == DownloadStatus.queued)) {
+      return d;
+    }
+  }
+  return null;
+});
+
 final downloadByAnimeAndEpisodeProvider =
     Provider.family<Download?, ({String animeId, int episodeNumber})>((ref, args) {
   final downloads = ref.watch(downloadsProvider).value ?? [];
