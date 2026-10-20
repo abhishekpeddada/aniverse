@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
@@ -111,6 +112,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   int? _nextCountdown;
   Timer? _nextTimer;
   bool _autoNextHandled = false;
+  static const _autoNextSeconds = 5;
 
   /// Intro/outro segments from AniSkip, and the one under the playhead.
   List<SkipSegment> _skipSegments = const [];
@@ -1035,7 +1037,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   void _onEpisodeCompleted() {
     if (_autoNextHandled || _nextEpisode == null || !mounted) return;
     _autoNextHandled = true;
-    setState(() => _nextCountdown = 5);
+    setState(() => _nextCountdown = _autoNextSeconds);
     _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return timer.cancel();
       final remaining = (_nextCountdown ?? 0) - 1;
@@ -1873,47 +1875,20 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                       ),
                     ),
 
-                  // Up next countdown after an episode ends
+                  // Up next card after an episode ends: cover image,
+                  // episode and title, and a play button whose ring fills
+                  // over the countdown.
                   if (_nextCountdown != null && _nextEpisode != null)
                     Positioned(
                       right: 24,
-                      bottom: 110,
-                      child: Material(
-                        color: Colors.black.withOpacity(0.85),
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Up next: Episode ${_nextEpisode!.number}',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Playing in $_nextCountdown s',
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  TextButton(
-                                    onPressed: _cancelAutoNext,
-                                    child: const Text('Cancel'),
-                                  ),
-                                  TextButton(
-                                    onPressed: _playNextEpisode,
-                                    child: const Text('Play now'),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
+                      bottom: 24,
+                      child: _UpNextCard(
+                        episodeNumber: _nextEpisode!.number,
+                        animeTitle: widget.animeTitle,
+                        imageUrl: widget.animeImage,
+                        countdown: const Duration(seconds: _autoNextSeconds),
+                        onPlay: _playNextEpisode,
+                        onCancel: _cancelAutoNext,
                       ),
                     ),
 
@@ -1986,6 +1961,146 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           ),
         );
       },
+    );
+  }
+}
+
+/// The "Up next" card shown when an episode ends (design A): the anime's
+/// cover, the next episode and title, Cancel, and a play button whose
+/// ring fills over [countdown] before the next episode starts.
+class _UpNextCard extends StatelessWidget {
+  const _UpNextCard({
+    required this.episodeNumber,
+    required this.animeTitle,
+    required this.imageUrl,
+    required this.countdown,
+    required this.onPlay,
+    required this.onCancel,
+  });
+
+  static const _accent = Color(0xFF2DD4BF);
+
+  final int episodeNumber;
+  final String animeTitle;
+  final String? imageUrl;
+  final Duration countdown;
+  final VoidCallback onPlay;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xF0121216),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: Color(0x1AFFFFFF)),
+      ),
+      child: SizedBox(
+        width: 340,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 112,
+                  height: 64,
+                  child: imageUrl == null
+                      ? const ColoredBox(color: Color(0xFF3A2D55))
+                      : CachedNetworkImage(
+                          imageUrl: imageUrl!,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) =>
+                              const ColoredBox(color: Color(0xFF3A2D55)),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'UP NEXT',
+                      style: TextStyle(
+                        color: _accent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Episode $episodeNumber',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      animeTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Color(0xFFB4B4BC), fontSize: 12),
+                    ),
+                    TextButton(
+                      onPressed: onCancel,
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFD4D4D8),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Semantics(
+                button: true,
+                label: 'Play episode $episodeNumber now',
+                child: InkWell(
+                  onTap: onPlay,
+                  customBorder: const CircleBorder(),
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Fills once over the countdown, in step with the
+                        // timer that starts the next episode.
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: 1),
+                          duration: countdown,
+                          builder: (context, value, _) => SizedBox.expand(
+                            child: Padding(
+                              padding: const EdgeInsets.all(2),
+                              child: CircularProgressIndicator(
+                                value: value,
+                                strokeWidth: 4,
+                                color: _accent,
+                                backgroundColor: const Color(0x2EFFFFFF),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.play_arrow_rounded,
+                            color: Colors.white, size: 30),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
