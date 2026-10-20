@@ -18,7 +18,10 @@ import '../../providers/raiden_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/download_service.dart';
 import '../../services/firestore_service.dart';
+import '../../models/episode_model.dart';
 import '../../models/watch_history_model.dart';
+import '../../providers/download_provider.dart';
+import '../../utils/playback_rules.dart';
 import 'widgets/quality_selector.dart';
 
 class VideoPlayerScreen extends ConsumerStatefulWidget {
@@ -100,6 +103,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   /// touched without seeking or pausing; a tap only reveals the unlock button.
   bool _controlsLocked = false;
   bool _showUnlockButton = false;
+
+  /// The episode to autoplay when this one ends, and the countdown shown
+  /// before it starts (null when no countdown is running).
+  Episode? _nextEpisode;
+  int? _nextCountdown;
+  Timer? _nextTimer;
+  bool _autoNextHandled = false;
+
+  /// Intro/outro segments from AniSkip, and the one under the playhead.
+  List<SkipSegment> _skipSegments = const [];
+  SkipSegment? _activeSkip;
+  bool _skipTimesRequested = false;
   Timer? _unlockButtonTimer;
   Timer? _hideControlsTimer;
 
@@ -354,6 +369,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     });
 
     _setupPositionListener();
+    _resolveNextEpisode();
     _initSystemControls();
 
     // Start auto-hide timer for controls
@@ -381,6 +397,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         });
       }
     }
+    await _applyCurrentOrientation();
   }
 
   void _setupOrientationListener() {
@@ -393,30 +410,45 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           .onOrientationChanged(useSensor: true)
           .listen((orientation) {
         if (!mounted || !_autoRotateEnabled) return;
-
-        List<DeviceOrientation> preferredOrientations;
-
-        switch (orientation) {
-          case NativeDeviceOrientation.landscapeLeft:
-            preferredOrientations = [DeviceOrientation.landscapeLeft];
-            break;
-          case NativeDeviceOrientation.landscapeRight:
-            preferredOrientations = [DeviceOrientation.landscapeRight];
-            break;
-          case NativeDeviceOrientation.portraitUp:
-            preferredOrientations = [DeviceOrientation.portraitUp];
-            break;
-          case NativeDeviceOrientation.portraitDown:
-            preferredOrientations = [DeviceOrientation.portraitDown];
-            break;
-          default:
-            return;
-        }
-
-        SystemChrome.setPreferredOrientations(preferredOrientations);
+        _applyOrientation(orientation);
       });
     } catch (e) {
       debugPrint('Orientation listener not available: $e');
+    }
+  }
+
+  void _applyOrientation(NativeDeviceOrientation orientation) {
+    final DeviceOrientation preferred;
+    switch (orientation) {
+      case NativeDeviceOrientation.landscapeLeft:
+        preferred = DeviceOrientation.landscapeLeft;
+        break;
+      case NativeDeviceOrientation.landscapeRight:
+        preferred = DeviceOrientation.landscapeRight;
+        break;
+      case NativeDeviceOrientation.portraitUp:
+        preferred = DeviceOrientation.portraitUp;
+        break;
+      case NativeDeviceOrientation.portraitDown:
+        preferred = DeviceOrientation.portraitDown;
+        break;
+      default:
+        return;
+    }
+    SystemChrome.setPreferredOrientations([preferred]);
+  }
+
+  /// The sensor stream only reports changes, so when auto-rotate is turned
+  /// on (or the player opens) with the phone already sideways, nothing
+  /// rotated until the phone moved again. Apply the current orientation now.
+  Future<void> _applyCurrentOrientation() async {
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) return;
+    try {
+      final orientation =
+          await NativeDeviceOrientationCommunicator().orientation(useSensor: true);
+      if (mounted && _autoRotateEnabled) _applyOrientation(orientation);
+    } catch (e) {
+      debugPrint('Could not read device orientation: $e');
     }
   }
 
@@ -424,6 +456,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     setState(() {
       _autoRotateEnabled = !_autoRotateEnabled;
     });
+    if (_autoRotateEnabled) unawaited(_applyCurrentOrientation());
 
     final user = ref.read(currentUserProvider);
     if (user != null) {
@@ -731,6 +764,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
     try {
       final source = _availableSources[_currentSourceIndex];
+      final malId = source['malId'] as String?;
+      if (malId != null && !_skipTimesRequested) {
+        _skipTimesRequested = true;
+        unawaited(_loadSkipTimes(malId));
+      }
       final videoUrl = source['url'];
       // Each provider needs its own Referer; fall back to the AllAnime one.
       final headers = Map<String, String>.from(
@@ -944,6 +982,82 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     }
   }
 
+  /// Fetches intro/outro times from AniSkip, as ani-cli's ani-skip does.
+  /// Optional: without them the skip button just doesn't appear.
+  Future<void> _loadSkipTimes(String malId) async {
+    try {
+      final uri = Uri.parse('https://api.aniskip.com/v1/skip-times/'
+          '$malId/${widget.episodeNumber}?types=op&types=ed');
+      final response =
+          await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return;
+      final json = jsonDecode(response.body);
+      if (json is! Map<String, dynamic>) return;
+      final segments = PlaybackRules.parseSkipTimes(json);
+      if (mounted) setState(() => _skipSegments = segments);
+    } catch (e) {
+      debugPrint('Skip times unavailable: $e');
+    }
+  }
+
+  Future<void> _resolveNextEpisode() async {
+    if (widget.animeId.startsWith('raiden_')) return;
+    try {
+      final details = await ref.read(animeDetailsProvider(widget.animeId).future);
+      final episodes = details?['episodes'];
+      if (episodes is List<Episode> && mounted) {
+        _nextEpisode = PlaybackRules.nextEpisode(episodes, widget.episodeNumber);
+      }
+    } catch (e) {
+      debugPrint('Could not resolve next episode: $e');
+    }
+  }
+
+  void _onEpisodeCompleted() {
+    if (_autoNextHandled || _nextEpisode == null || !mounted) return;
+    _autoNextHandled = true;
+    setState(() => _nextCountdown = 5);
+    _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return timer.cancel();
+      final remaining = (_nextCountdown ?? 0) - 1;
+      if (remaining <= 0) {
+        timer.cancel();
+        _playNextEpisode();
+      } else {
+        setState(() => _nextCountdown = remaining);
+      }
+    });
+  }
+
+  void _cancelAutoNext() {
+    _nextTimer?.cancel();
+    setState(() => _nextCountdown = null);
+  }
+
+  /// Opens the next episode in place of this one, using its download when
+  /// there is one.
+  void _playNextEpisode() {
+    final next = _nextEpisode;
+    if (next == null || !mounted) return;
+    _nextTimer?.cancel();
+
+    final download = ref.read(downloadByAnimeAndEpisodeProvider(
+        (animeId: widget.animeId, episodeNumber: next.number)));
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerScreen(
+          episodeId: next.id,
+          animeId: widget.animeId,
+          animeTitle: widget.animeTitle,
+          animeImage: widget.animeImage,
+          episodeNumber: next.number,
+          isOffline: download?.filePath != null,
+          offlineFilePath: download?.filePath,
+        ),
+      ),
+    );
+  }
+
   void _playNextSource() {
     if (_failedSourceAttempt == _sourceAttempt) return;
     _failedSourceAttempt = _sourceAttempt;
@@ -985,6 +1099,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           _saveWatchHistory(position, duration);
         }
       }
+
+      final skip = PlaybackRules.activeSkip(_skipSegments, position);
+      if (!identical(skip, _activeSkip) && mounted) {
+        setState(() => _activeSkip = skip);
+      }
+    });
+
+    player.stream.completed.listen((completed) {
+      if (completed) _onEpisodeCompleted();
     });
 
     // Track buffering state for loading indicator
@@ -1090,6 +1213,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     _feedbackTimer?.cancel();
     _hideControlsTimer?.cancel();
     _unlockButtonTimer?.cancel();
+    _nextTimer?.cancel();
     _historySaveTimer?.cancel();
     _orientationSubscription?.cancel();
 
@@ -1699,6 +1823,70 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                       ),
                     ),
                   ),
+                  // Skip intro/outro, shown while the playhead is in a segment
+                  if (_activeSkip != null && !_controlsLocked)
+                    Positioned(
+                      right: 24,
+                      bottom: 110,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black,
+                        ),
+                        icon: const Icon(Icons.fast_forward),
+                        label: Text(_activeSkip!.label),
+                        onPressed: () {
+                          final target = _activeSkip!.end;
+                          setState(() => _activeSkip = null);
+                          player.seek(target);
+                        },
+                      ),
+                    ),
+
+                  // Up next countdown after an episode ends
+                  if (_nextCountdown != null && _nextEpisode != null)
+                    Positioned(
+                      right: 24,
+                      bottom: 110,
+                      child: Material(
+                        color: Colors.black.withOpacity(0.85),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Up next: Episode ${_nextEpisode!.number}',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Playing in $_nextCountdown s',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextButton(
+                                    onPressed: _cancelAutoNext,
+                                    child: const Text('Cancel'),
+                                  ),
+                                  TextButton(
+                                    onPressed: _playNextEpisode,
+                                    child: const Text('Play now'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
                   // 4. Unlock button, shown briefly on tap while locked
                   if (_controlsLocked && _showUnlockButton)
                     Positioned(

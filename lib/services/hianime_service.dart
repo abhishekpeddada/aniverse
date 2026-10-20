@@ -82,6 +82,8 @@ class HianimeService {
           'User-Agent': userAgent,
         },
         if (stream.subtitleUrl != null) 'subtitle': stream.subtitleUrl,
+        // MyAnimeList id, used to look up intro/outro skip times.
+        if (stream.malId != null) 'malId': stream.malId,
       },
     ];
   }
@@ -205,7 +207,8 @@ class HianimeService {
     return null;
   }
 
-  Future<({String url, String referer, String? subtitleUrl})> _stream(
+  Future<({String url, String referer, String? subtitleUrl, String? malId})>
+      _stream(
     String episodeId,
     String translationType,
   ) async {
@@ -249,6 +252,8 @@ class HianimeService {
       // The stream host wants the embed site as referer.
       referer: '$origin/',
       subtitleUrl: defaultSubtitle(config),
+      // The embed URL carries the MAL id, as ani-cli reads it for ani-skip.
+      malId: RegExp(r'/mal/([0-9]+)/').firstMatch(embedUrl)?.group(1),
     );
   }
 

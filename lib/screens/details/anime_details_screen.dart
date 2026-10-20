@@ -10,6 +10,8 @@ import '../../models/episode_model.dart';
 import '../../models/anime_model.dart';
 import '../../models/download_model.dart';
 import '../../services/raiden_api_service.dart';
+import '../../providers/history_provider.dart';
+import '../../utils/playback_rules.dart';
 import '../player/video_player_screen.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 
@@ -68,6 +70,15 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
 
           final anime = data['anime'];
           final episodes = data['episodes'] as List<Episode>;
+
+          // Recomputed from live history, so finishing an episode moves the
+          // highlight without reopening the app.
+          final continueEpisodeId = PlaybackRules.continueEpisodeId(
+            history: ref.watch(historyProvider),
+            animeId: widget.animeId,
+            episodes: episodes,
+            fallback: widget.continueEpisodeId,
+          );
 
           // Cache the anime for watchlist/favorites display
           storageService.cacheAnime(anime);
@@ -295,8 +306,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
                     if (index >= filteredEpisodes.length) return null;
 
                     final episode = filteredEpisodes[index];
-                    final isNextToWatch =
-                        episode.id == widget.continueEpisodeId;
+                    final isNextToWatch = episode.id == continueEpisodeId;
 
                     return Container(
                       color:
