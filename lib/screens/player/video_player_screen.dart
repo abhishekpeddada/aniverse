@@ -1506,21 +1506,32 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                       duration: const Duration(milliseconds: 300),
                       child: IgnorePointer(
                         ignoring: !_showControls || _controlsLocked,
+                        // The player's streams don't replay their last value,
+                        // and these controls are rebuilt whenever a source
+                        // (re)opens, so a duration reported in between was
+                        // lost: the bar showed 00:00 and couldn't seek. Start
+                        // from the player's current state instead.
                         child: StreamBuilder<bool>(
                           stream: player.stream.playing,
+                          initialData: player.state.playing,
                           builder: (context, playingSnapshot) {
                             return StreamBuilder<Duration>(
                               stream: player.stream.position,
+                              initialData: player.state.position,
                               builder: (context, positionSnapshot) {
                                 return StreamBuilder<Duration>(
                                   stream: player.stream.duration,
+                                  initialData: player.state.duration,
                                   builder: (context, durationSnapshot) {
                                     final isPlaying =
                                         playingSnapshot.data ?? false;
                                     final position =
                                         positionSnapshot.data ?? Duration.zero;
-                                    final duration =
+                                    final reported =
                                         durationSnapshot.data ?? Duration.zero;
+                                    final duration = reported > Duration.zero
+                                        ? reported
+                                        : player.state.duration;
                                     final progress = duration.inMilliseconds > 0
                                         ? position.inMilliseconds /
                                             duration.inMilliseconds
