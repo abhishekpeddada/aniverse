@@ -80,6 +80,24 @@ class PlaybackRules {
     return segments;
   }
 
+  static Map<String, dynamic> segmentToJson(SkipSegment segment) => {
+        'type': segment.type,
+        'startMs': segment.start.inMilliseconds,
+        'endMs': segment.end.inMilliseconds,
+      };
+
+  static SkipSegment? segmentFromJson(Map json) {
+    final type = json['type'];
+    final start = json['startMs'];
+    final end = json['endMs'];
+    if (type is! String || start is! int || end is! int) return null;
+    return SkipSegment(
+      type: type,
+      start: Duration(milliseconds: start),
+      end: Duration(milliseconds: end),
+    );
+  }
+
   /// The segment covering [position], if any. The last second of a segment
   /// is excluded so the button doesn't flash just as it ends on its own.
   static SkipSegment? activeSkip(List<SkipSegment> segments, Duration position) {

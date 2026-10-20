@@ -71,4 +71,14 @@ void main() {
     expect(PlaybackRules.activeSkip([op], const Duration(seconds: 60)), op);
     expect(PlaybackRules.activeSkip([op], const Duration(milliseconds: 119500)), isNull);
   });
+
+  test('skip segments survive a JSON round trip', () {
+    const ed = SkipSegment(
+        type: 'ed', start: Duration(seconds: 1300), end: Duration(seconds: 1390));
+    final back = PlaybackRules.segmentFromJson(PlaybackRules.segmentToJson(ed));
+    expect(back?.type, 'ed');
+    expect(back?.start, ed.start);
+    expect(back?.end, ed.end);
+    expect(PlaybackRules.segmentFromJson({'type': 'op'}), isNull);
+  });
 }

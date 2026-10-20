@@ -640,6 +640,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
       String quality = 'default'; // Use default quality
       Map<String, String>? headers;
       String? subtitleUrl;
+      String? malId;
 
       if (episode.id.startsWith('raiden_')) {
         final raidenData = container.read(raidenAnimeDetailsProvider(episode.id));
@@ -677,6 +678,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
           downloadUrl = source['url'] as String?;
           headers = (source['headers'] as Map?)?.cast<String, String>();
           subtitleUrl = source['subtitle'] as String?;
+          malId = source['malId'] as String?;
         }
       }
 
@@ -693,6 +695,7 @@ class _AnimeDetailsScreenState extends ConsumerState<AnimeDetailsScreen> {
         quality: quality,
         headers: headers,
         subtitleUrl: subtitleUrl,
+        malId: malId,
       );
       return null;
     } catch (e) {

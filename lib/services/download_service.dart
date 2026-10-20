@@ -11,6 +11,7 @@ import '../models/anime_model.dart';
 import 'download_storage_service.dart';
 import 'anime_api_service.dart';
 import 'hls_downloader.dart';
+import 'aniskip_service.dart';
 
 class DownloadService {
   final Dio _dio;
@@ -322,6 +323,7 @@ class DownloadService {
     required String quality,
     Map<String, String>? headers,
     String? subtitleUrl,
+    String? malId,
   }) async {
     final downloadId = '${episodeId}_$quality';
     final episodeKey = '${animeId}_ep$episodeNumber'; // Unique key for episode regardless of episodeId
@@ -478,6 +480,10 @@ class DownloadService {
 
         if (subtitleUrl != null) {
           await _downloadSubtitle(subtitleUrl, filePath, requestHeaders);
+        }
+        // Keep intro/outro skip times with the video for offline playback.
+        if (malId != null) {
+          await AniSkipService.saveForDownload(filePath, malId, episodeNumber);
         }
 
         final completedDownload = download.copyWith(
@@ -775,6 +781,11 @@ class DownloadService {
 
       final subtitle = source['subtitle'] as String?;
       if (subtitle != null) await _downloadSubtitle(subtitle, filePath, headers);
+      final malId = source['malId'] as String?;
+      if (malId != null) {
+        await AniSkipService.saveForDownload(
+            filePath, malId, download.episodeNumber);
+      }
 
       final size = await File(filePath).length();
       await _storage.updateDownload(download.copyWith(
@@ -844,9 +855,12 @@ class DownloadService {
       if (await file.exists()) {
         await file.delete();
       }
-      final subtitle = File(subtitlePathFor(download.filePath!));
-      if (await subtitle.exists()) {
-        await subtitle.delete();
+      for (final sidecar in [
+        subtitlePathFor(download.filePath!),
+        AniSkipService.sidecarPathFor(download.filePath!),
+      ]) {
+        final file = File(sidecar);
+        if (await file.exists()) await file.delete();
       }
     }
 

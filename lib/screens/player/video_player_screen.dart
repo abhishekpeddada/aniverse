@@ -16,6 +16,7 @@ import '../../providers/history_provider.dart';
 import '../../providers/storage_provider.dart';
 import '../../providers/raiden_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/aniskip_service.dart';
 import '../../services/download_service.dart';
 import '../../services/firestore_service.dart';
 import '../../models/episode_model.dart';
@@ -654,6 +655,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
 
         await player.open(Media(widget.offlineFilePath!));
+        unawaited(_loadOfflineSkipTimes(widget.offlineFilePath!));
 
         final subtitleFile =
             File(DownloadService.subtitlePathFor(widget.offlineFilePath!));
@@ -985,19 +987,36 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   /// Fetches intro/outro times from AniSkip, as ani-cli's ani-skip does.
   /// Optional: without them the skip button just doesn't appear.
   Future<void> _loadSkipTimes(String malId) async {
-    try {
-      final uri = Uri.parse('https://api.aniskip.com/v1/skip-times/'
-          '$malId/${widget.episodeNumber}?types=op&types=ed');
-      final response =
-          await http.get(uri).timeout(const Duration(seconds: 10));
-      if (response.statusCode != 200) return;
-      final json = jsonDecode(response.body);
-      if (json is! Map<String, dynamic>) return;
-      final segments = PlaybackRules.parseSkipTimes(json);
-      if (mounted) setState(() => _skipSegments = segments);
-    } catch (e) {
-      debugPrint('Skip times unavailable: $e');
+    final segments = await AniSkipService.fetch(malId, widget.episodeNumber);
+    if (segments != null && mounted) setState(() => _skipSegments = segments);
+  }
+
+  /// Skip times for a downloaded episode: from the file saved with it, so
+  /// they work offline. Downloads made before that file existed look the
+  /// times up once when online and save them for next time.
+  Future<void> _loadOfflineSkipTimes(String videoPath) async {
+    final saved = await AniSkipService.readSidecar(videoPath);
+    if (saved.segments != null) {
+      if (mounted) setState(() => _skipSegments = saved.segments!);
+      return;
     }
+
+    var malId = saved.malId;
+    if (malId == null && !widget.animeId.startsWith('raiden_')) {
+      final result = await ref
+          .read(animeApiServiceProvider)
+          .getEpisodeSources(widget.episodeId);
+      final sources = result?['sources'] as List?;
+      if (sources != null && sources.isNotEmpty) {
+        malId = (sources.first as Map)['malId'] as String?;
+      }
+    }
+    if (malId == null) return;
+
+    final segments = await AniSkipService.fetch(malId, widget.episodeNumber);
+    if (segments == null) return;
+    await AniSkipService.writeSidecar(videoPath, malId: malId, segments: segments);
+    if (mounted) setState(() => _skipSegments = segments);
   }
 
   Future<void> _resolveNextEpisode() async {
