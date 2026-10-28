@@ -11,7 +11,9 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
-  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  // Looked up on use: Firebase isn't started on desktop, where reading it
+  // eagerly would throw as soon as this service was created.
+  FirebaseMessaging get _firebaseMessaging => FirebaseMessaging.instance;
 
   bool _initialized = false;
 

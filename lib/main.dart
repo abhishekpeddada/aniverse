@@ -12,6 +12,7 @@ import 'services/notification_storage.dart';
 import 'services/notification_service.dart';
 import 'services/background_episode_checker.dart';
 import 'screens/home/home_screen.dart';
+import 'providers/download_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,9 +51,16 @@ void main() async {
     debugPrint('Error clearing anime cache: $e');
   }
 
+  // Start the download service now rather than on the first download: it
+  // creates the downloads folder and imports episodes already in it, so
+  // they show up as soon as the app opens.
+  final container = ProviderContainer();
+  container.read(downloadServiceProvider);
+
   runApp(
-    const ProviderScope(
-      child: MyApp(),
+    UncontrolledProviderScope(
+      container: container,
+      child: const MyApp(),
     ),
   );
 }

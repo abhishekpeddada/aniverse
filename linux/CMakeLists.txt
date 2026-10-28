@@ -2,6 +2,11 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
+# media_kit_libs_linux builds mimalloc from a GitHub archive whose pinned MD5
+# no longer matches what GitHub serves, which fails the build. Skip it; the
+# plugin then uses a system libmimalloc if one is installed.
+set(MIMALLOC_USE_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "anime_watcher")

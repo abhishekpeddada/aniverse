@@ -123,7 +123,9 @@ class DownloadService {
              id: id,
              animeId: animeId, // Use REAL Anime ID
              animeTitle: 'Restored ($animeId)', // We don't have title, use ID
-             episodeId: 'restored_ep_${filename.hashCode}', 
+             // The app's own episode id shape, so the restored file
+             // matches its episode in the anime's episode list.
+             episodeId: animeId.startsWith('raiden_') ? animeId : '$animeId-$epNum',
              episodeNumber: epNum,
              downloadUrl: 'file://${file.path}', 
              quality: quality,
@@ -264,11 +266,17 @@ class DownloadService {
     if (Platform.isAndroid) {
       // Use standard Download directory
       directory = Directory('/storage/emulated/0/Download');
+    } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // The user's Downloads folder (XDG on Linux, Known Folder on Windows),
+      // so episodes are easy to find and survive reinstalls.
+      directory = await getDownloadsDirectory() ??
+          await getApplicationDocumentsDirectory();
     } else {
       directory = await getApplicationDocumentsDirectory();
     }
     
-    final downloadsDir = Directory('${directory.path}/Aniverse');
+    final downloadsDir =
+        Directory('${directory.path}${Platform.pathSeparator}Aniverse');
     if (!await downloadsDir.exists()) {
       await downloadsDir.create(recursive: true);
     }
@@ -427,7 +435,7 @@ class DownloadService {
 
       final downloadPath = await _getDownloadPath();
       final fileName = '${animeId}_ep${episodeNumber}_$quality.mp4';
-      final filePath = '$downloadPath/$fileName';
+      final filePath = '$downloadPath${Platform.pathSeparator}$fileName';
 
       final cancelToken = CancelToken();
       _cancelTokens[downloadId] = cancelToken;
@@ -560,7 +568,7 @@ class DownloadService {
 
       final downloadPath = await _getDownloadPath();
       final fileName = '${download.animeId}_ep${download.episodeNumber}_${download.quality}.mp4';
-      final filePath = '$downloadPath/$fileName';
+      final filePath = '$downloadPath${Platform.pathSeparator}$fileName';
       final file = File(filePath);
       
       int existingBytes = 0;
@@ -743,7 +751,7 @@ class DownloadService {
   /// HLS downloads can't resume by byte range and their stream URLs expire,
   /// so resolve a fresh stream and download it again.
   Future<void> _resumeHls(Download download) async {
-    final filePath = '${await _getDownloadPath()}/'
+    final filePath = '${await _getDownloadPath()}${Platform.pathSeparator}'
         '${download.animeId}_ep${download.episodeNumber}_${download.quality}.mp4';
     final cancelToken = CancelToken();
     _cancelTokens[download.id] = cancelToken;

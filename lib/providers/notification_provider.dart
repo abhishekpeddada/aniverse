@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/notification_settings_model.dart';
 import '../services/background_episode_checker.dart';
@@ -22,6 +25,8 @@ class NotificationSettingsNotifier extends StateNotifier<NotificationSettings> {
   Future<void> toggleNewEpisodeAlerts(bool value) async {
     final newSettings = state.copyWith(newEpisodeAlerts: value);
     await updateSettings(newSettings);
+    // The background check uses Android's WorkManager.
+    if (kIsWeb || !Platform.isAndroid) return;
 
     // Start or stop the background check now instead of on the next launch.
     // The first check only records the current episode counts.

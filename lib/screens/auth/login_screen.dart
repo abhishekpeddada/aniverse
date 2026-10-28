@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/auth_service.dart';
@@ -48,6 +51,19 @@ class LoginScreen extends ConsumerWidget {
               const SizedBox(height: 48),
               ElevatedButton.icon(
                 onPressed: () async {
+                  // Google sign-in needs Firebase, which this app only
+                  // runs on Android/iOS. Say so instead of doing nothing.
+                  if (!kIsWeb && !(Platform.isAndroid || Platform.isIOS)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Google sign-in is not available in the desktop app yet. '
+                          'Your history, lists and downloads are saved on this computer.',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
                   try {
                     final credential = await authService.signInWithGoogle();
                     
