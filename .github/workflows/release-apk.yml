@@ -1,7 +1,8 @@
-name: Release APK
+name: Release
 
-# Attaches an APK that an earlier "Build APK" run already produced to the
-# GitHub release TAG, without rebuilding it, and sets the release notes.
+# Attaches the APK and the Windows/Linux builds that earlier "Build APK" and
+# "Build Desktop" runs already produced to the GitHub release TAG, without
+# rebuilding them, and sets the release notes.
 #
 # The release (and its tag) must be created on GitHub first: the workflow
 # token can't create a tag on a commit that adds workflow files. Runs when
@@ -18,8 +19,9 @@ permissions:
   actions: read
 
 env:
-  SOURCE_RUN_ID: '38123821323'
-  TAG: v1.4.1
+  SOURCE_RUN_ID: '40674906108'
+  DESKTOP_RUN_ID: '40674906010'
+  TAG: v1.4.2
 
 jobs:
   release:
@@ -31,9 +33,18 @@ jobs:
           name: aniverse-release-apk
           run-id: ${{ env.SOURCE_RUN_ID }}
           github-token: ${{ github.token }}
-          path: apk
+          path: dist
 
-      - name: Attach APK to the release
+      - name: Download Windows and Linux builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aniverse-*-x64
+          merge-multiple: true
+          run-id: ${{ env.DESKTOP_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: dist
+
+      - name: Attach builds to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -41,23 +52,35 @@ jobs:
             echo "::notice::Release $TAG doesn't exist yet. Create it on GitHub, then re-run this workflow."
             exit 0
           fi
-          cd apk
-          sha256sum app-release.apk > app-release.apk.sha256
+          cd dist
+          mv app-release.apk aniverse-android.apk
+          sha256sum aniverse-android.apk aniverse-windows-x64.zip aniverse-linux-x64.tar.gz > SHA256SUMS.txt
           cat > notes.md <<'NOTES'
           ## What's changed
 
-          - **Resume works when streaming.** Choosing Resume now continues where you stopped, and the resume point is no longer reset to the start.
-          - **Lock controls:** tap the lock icon in the player's top bar to disable controls and gestures. Tap the screen to show the unlock button.
-          - **Faster downloads:** episode segments download in parallel.
-          - **Favorites and Watchlist** load their titles and images again after a reinstall, instead of staying on "Loading...".
-          - **Adult (Raiden) titles** no longer send the AllAnime referer, and the list loads faster with request timeouts.
+          - **Windows and Linux apps.** Downloads are saved in `Downloads/Aniverse`, and episodes already in that folder (for example copied from your phone, with the same file names) appear in the app when it starts.
+          - **New-episode notifications** for anime in Favorites, Watchlist and watch history, without duplicates. The app asks to be exempted from battery optimization so checks still run when it isn't open.
+          - **Autoplay next** with an "Up next" card and countdown at the end of an episode.
+          - **Skip intro / outro** buttons, for streams and downloaded episodes.
+          - **Auto-rotate** in the player, and watched episodes update right away.
+          - **Download all** button on the anime page; download progress shows on the episode button instead of pop-up messages.
+          - **Seek bar** fixed when it showed 00:00.
 
-          ## Notes
+          ## Downloads
 
-          - Signed with the same key as v1.4.0, so it installs over it directly.
-          - The version shown inside the app is still 1.3.0.
+          | Platform | File |
+          |---|---|
+          | Android | `aniverse-android.apk` (installs over v1.4.1) |
+          | Windows 10/11 (64-bit) | `aniverse-windows-x64.zip`: unzip, then run `AniVerse\anime_watcher.exe` |
+          | Linux (x64) | `aniverse-linux-x64.tar.gz`: extract, then run `aniverse/anime_watcher`. Needs libmpv (`sudo apt install libmpv2`). |
+
+          ## Desktop notes
+
+          - Google sign-in isn't available on Windows or Linux yet; history, lists and downloads are saved on the computer.
+          - New-episode notifications are Android-only.
           NOTES
-          gh release upload "$TAG" app-release.apk app-release.apk.sha256 \
+          gh release upload "$TAG" aniverse-android.apk aniverse-windows-x64.zip \
+            aniverse-linux-x64.tar.gz SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --clobber
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
             --title "AniVerse $TAG" --notes-file notes.md
