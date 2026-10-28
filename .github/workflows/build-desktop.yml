@@ -67,6 +67,10 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows release
+        # The Firebase C++ SDK pulled in by firebase_core declares a CMake
+        # minimum below 3.5, which CMake 4 rejects unless this is set.
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: flutter build windows --release
 
       - name: Package app
