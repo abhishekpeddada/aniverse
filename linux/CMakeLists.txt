@@ -117,6 +117,14 @@ install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)
 
+# The app icon, used by the window and by install.sh.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/packaging/icons"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+
+# Adds the app to the user's app menu, so docks and launchers can use it.
+install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/install.sh"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
+
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")

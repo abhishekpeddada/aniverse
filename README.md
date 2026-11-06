@@ -82,10 +82,26 @@ flutter build apk --release
 3. Download and place configuration files in the appropriate directories
 4. Enable Google Sign-In in Firebase Console
 
+## Keyboard Controls (Windows and Linux)
+
+| Key | Action |
+|---|---|
+| Space or K | Play or pause |
+| Left / Right, or J / L | Back or forward 10 seconds |
+| Shift + Left / Right | Back or forward 60 seconds |
+| Up / Down | Volume |
+| M | Mute |
+| F or F11 | Fullscreen |
+| Esc | Cancel the up-next countdown, leave fullscreen, or close the player |
+| 0 to 9 | Jump to that tenth of the episode (5 is halfway) |
+| [ / ] or < / > | Slower or faster |
+| N | Next episode |
+| S | Skip intro or outro, when the button is showing |
+
 ## Known Limitations
 - Cross-device resume requires Firebase integration
 - Position tracking is local-only to reduce database costs
-- Linux builds use external mpv player
+- Linux builds need libmpv installed (`sudo apt install libmpv2`, or `mpv` on Arch). Run `./install.sh` from the app's folder to add it to your app menu, so docks and launchers can use it.
 
 ## License
 
