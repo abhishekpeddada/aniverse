@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:native_device_orientation/native_device_orientation.dart';
+import 'package:window_manager/window_manager.dart';
 import '../../providers/anime_provider.dart';
 import '../../providers/history_provider.dart';
 import '../../providers/storage_provider.dart';
@@ -24,6 +25,7 @@ import '../../models/episode_model.dart';
 import '../../models/watch_history_model.dart';
 import '../../providers/download_provider.dart';
 import '../../utils/playback_rules.dart';
+import '../../utils/player_shortcuts.dart';
 import 'widgets/quality_selector.dart';
 
 class VideoPlayerScreen extends ConsumerStatefulWidget {
@@ -122,7 +124,28 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   Timer? _hideControlsTimer;
 
   // Playback speed
+  static const _speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
   double _playbackSpeed = 1.0;
+
+  // Keyboard controls, on Windows and Linux only. Android never registers the
+  // key handler, so none of this state is used there.
+  static final _usesKeyboard =
+      !kIsWeb && (Platform.isWindows || Platform.isLinux);
+
+  /// Players open now, and whether one put the window in fullscreen. The next
+  /// episode's player opens before the last one closes, so fullscreen carries
+  /// over and only ends when the last player is closed.
+  static int _openPlayers = 0;
+  static bool _windowFullscreen = false;
+
+  ModalRoute<dynamic>? _route;
+  double _volumeBeforeMute = 1.0;
+
+  /// Where key presses are seeking to. The player's position lags behind a
+  /// held key, so each press builds on this target instead.
+  Duration? _keySeekTarget;
+  Duration _keySeekTotal = Duration.zero;
+  Timer? _keySeekTimer;
 
   // Picture-in-Picture state
   bool _isInPipMode = false;
@@ -131,30 +154,6 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   // Buffering state
   bool _isBuffering = false;
-
-  Future<void> _saveVlcWatchHistory({int positionMs = 0, int durationMs = 0}) async {
-    final effectiveDuration = durationMs > 0 ? durationMs : 24 * 60 * 1000;
-    
-    final history = WatchHistory(
-      animeId: widget.animeId,
-      episodeId: widget.episodeId,
-      animeTitle: widget.animeTitle,
-      animeImage: widget.animeImage,
-      episodeNumber: widget.episodeNumber,
-      positionMs: positionMs,
-      durationMs: effectiveDuration,
-      lastWatched: DateTime.now(),
-    );
-
-    try {
-      await ref
-          .read(historyProvider.notifier)
-          .saveHistory(history, syncToCloud: true);
-      debugPrint('📝 VLC watch history saved: pos=$positionMs, dur=$effectiveDuration');
-    } catch (e) {
-      debugPrint('Failed to save VLC watch history: $e');
-    }
-  }
 
   void _resetHideTimer() {
     _hideControlsTimer?.cancel();
@@ -240,7 +239,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children:
-                  [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map((speed) {
+                  _speeds.map((speed) {
                 return RadioListTile<double>(
                   title: Text('${speed}x'),
                   value: speed,
@@ -352,6 +351,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    if (_usesKeyboard) {
+      _openPlayers++;
+      HardwareKeyboard.instance.addHandler(_onKeyEvent);
+    }
 
     _loadAutoRotatePreference();
     _setupOrientationListener();
@@ -488,7 +492,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   Future<void> _initSystemControls() async {
     if (kIsWeb || Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
-      _volume = 0.5;
+      // The player's own volume, which starts at full.
+      _volume = 1.0;
       _brightness = 0.5;
       return;
     }
@@ -525,7 +530,11 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   Future<void> _handleVolumeDrag(double delta) async {
     _volume += delta;
     _volume = _volume.clamp(0.0, 1.0);
-    VolumeController.instance.setVolume(_volume);
+    if (_usesKeyboard) {
+      player.setVolume(_volume * 100);
+    } else {
+      VolumeController.instance.setVolume(_volume);
+    }
     _showGestureFeedback(
       _volume > 0.5
           ? Icons.volume_up
@@ -573,6 +582,185 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     );
   }
 
+  /// Runs for every key in the app, so it needs no widget to have focus, which
+  /// a route doesn't reliably give. A dialog on top makes this route not
+  /// current, which leaves the dialog's keys alone.
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is KeyUpEvent || !mounted || _route?.isCurrent != true) {
+      return false;
+    }
+
+    // Leave combinations like Ctrl+Q and Alt+Tab to the system.
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return false;
+    }
+
+    final key = event.logicalKey;
+    final jump = PlayerShortcuts.jumpFractionFor(key);
+    final action =
+        PlayerShortcuts.actionFor(key, shift: keyboard.isShiftPressed);
+    if (jump == null && action == null) return false;
+    if (event is KeyRepeatEvent && !(action?.repeats ?? false)) return true;
+
+    // Leaving and fullscreen also work while loading or after an error.
+    if (action == PlayerShortcut.back) {
+      _handleEscape();
+      return true;
+    }
+    if (action == PlayerShortcut.fullscreen) {
+      _setFullscreen(!_windowFullscreen);
+      return true;
+    }
+    if (!isInitialized || hasError) return true;
+
+    // A locked player ignores input, as it does for touch.
+    if (_controlsLocked) {
+      _flashUnlockButton();
+      return true;
+    }
+
+    if (jump != null) {
+      _jumpToFraction(jump);
+    } else {
+      _runShortcut(action!);
+    }
+    return true;
+  }
+
+  void _runShortcut(PlayerShortcut action) {
+    switch (action) {
+      case PlayerShortcut.playPause:
+        final willPlay = !player.state.playing;
+        player.playOrPause();
+        _showGestureFeedback(willPlay ? Icons.play_arrow : Icons.pause,
+            willPlay ? 'Play' : 'Pause');
+      case PlayerShortcut.seekBack:
+        _seekByKey(-PlayerShortcuts.seekStep);
+      case PlayerShortcut.seekForward:
+        _seekByKey(PlayerShortcuts.seekStep);
+      case PlayerShortcut.seekBackLong:
+        _seekByKey(-PlayerShortcuts.longSeekStep);
+      case PlayerShortcut.seekForwardLong:
+        _seekByKey(PlayerShortcuts.longSeekStep);
+      case PlayerShortcut.volumeUp:
+        _setPlayerVolume(_volume + PlayerShortcuts.volumeStep);
+      case PlayerShortcut.volumeDown:
+        _setPlayerVolume(_volume - PlayerShortcuts.volumeStep);
+      case PlayerShortcut.mute:
+        if (_volume > 0) {
+          _volumeBeforeMute = _volume;
+          _setPlayerVolume(0);
+        } else {
+          _setPlayerVolume(_volumeBeforeMute);
+        }
+      case PlayerShortcut.speedDown:
+      case PlayerShortcut.speedUp:
+        final speed = PlayerShortcuts.stepSpeed(_speeds, _playbackSpeed,
+            up: action == PlayerShortcut.speedUp);
+        setState(() => _playbackSpeed = speed);
+        player.setRate(speed);
+        _showGestureFeedback(Icons.speed, '${speed}x');
+      case PlayerShortcut.nextEpisode:
+        if (_nextEpisode != null) {
+          _playNextEpisode();
+        } else {
+          _showMessage('This is the last episode');
+        }
+      case PlayerShortcut.skipSegment:
+        if (_activeSkip != null) _skipActiveSegment();
+      case PlayerShortcut.fullscreen:
+      case PlayerShortcut.back:
+        break; // Handled in _onKeyEvent.
+    }
+  }
+
+  void _seekByKey(Duration delta) {
+    final duration = player.state.duration;
+    if (duration <= Duration.zero) return;
+
+    final from = _keySeekTarget ?? player.state.position;
+    final to = Duration(
+        milliseconds:
+            (from + delta).inMilliseconds.clamp(0, duration.inMilliseconds));
+
+    _keySeekTotal += delta;
+    _keySeekTarget = to;
+    _keySeekTimer?.cancel();
+    _keySeekTimer = Timer(const Duration(milliseconds: 800), () {
+      _keySeekTarget = null;
+      _keySeekTotal = Duration.zero;
+    });
+
+    _lastSeekTime = DateTime.now();
+    player.seek(to);
+    _showGestureFeedback(
+      _keySeekTotal.isNegative ? Icons.fast_rewind : Icons.fast_forward,
+      '${_keySeekTotal.isNegative ? "-" : "+"}${_keySeekTotal.inSeconds.abs()}s',
+    );
+  }
+
+  void _jumpToFraction(double fraction) {
+    final duration = player.state.duration;
+    if (duration <= Duration.zero) return;
+    final to = duration * fraction;
+    _keySeekTimer?.cancel();
+    _keySeekTarget = null;
+    _keySeekTotal = Duration.zero;
+    _lastSeekTime = DateTime.now();
+    player.seek(to);
+    _showGestureFeedback(Icons.fast_forward, _formatDuration(to));
+  }
+
+  void _setPlayerVolume(double volume) {
+    _volume = volume.clamp(0.0, 1.0);
+    player.setVolume(_volume * 100);
+    final percent = (_volume * 100).round();
+    _showGestureFeedback(
+      percent > 50
+          ? Icons.volume_up
+          : percent > 0
+              ? Icons.volume_down
+              : Icons.volume_off,
+      '$percent%',
+    );
+  }
+
+  /// Esc backs out one step at a time: the up-next countdown, then fullscreen,
+  /// then the player.
+  void _handleEscape() {
+    if (_nextCountdown != null) {
+      _cancelAutoNext();
+    } else if (_windowFullscreen) {
+      _setFullscreen(false);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _setFullscreen(bool fullscreen) async {
+    _windowFullscreen = fullscreen;
+    try {
+      await windowManager.setFullScreen(fullscreen);
+    } catch (e) {
+      debugPrint('Could not change fullscreen: $e');
+    }
+  }
+
+  void _skipActiveSegment() {
+    final target = _activeSkip!.end;
+    setState(() => _activeSkip = null);
+    player.seek(target);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
@@ -595,66 +783,6 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     try {
       if (widget.isOffline && widget.offlineFilePath != null) {
         debugPrint('🎬 Playing offline: ${widget.offlineFilePath}');
-
-        if (!kIsWeb && Platform.isLinux) {
-          final externalPlayer = await _showExternalPlayerDialog();
-
-          if (externalPlayer == null) {
-            debugPrint('🐧 User cancelled external player selection for offline video');
-             if (mounted) Navigator.of(context).pop();
-            return;
-          }
-
-          debugPrint('🐧 Launching $externalPlayer for offline video on Linux');
-
-          try {
-            if (externalPlayer == 'vlc') {
-              await _saveVlcWatchHistory(positionMs: 0);
-
-              final vlcProcess = await Process.start('vlc', [
-                '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-                widget.offlineFilePath!,
-              ]);
-
-              vlcProcess.exitCode.then((code) async {
-                debugPrint('VLC exited with code: $code');
-                if (code == 0) {
-                  await _saveVlcWatchHistory(
-                      positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-                }
-              });
-            } else if (externalPlayer == 'mpv') {
-              // MPV Logic
-              await _saveVlcWatchHistory(positionMs: 0); // Reuse history logic for now
-
-              final mpvProcess = await Process.start('mpv', [
-                '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-                widget.offlineFilePath!,
-              ]);
-
-              mpvProcess.exitCode.then((code) async {
-                 debugPrint('MPV exited with code: $code');
-                 if (code == 0) {
-                   await _saveVlcWatchHistory(
-                      positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-                 }
-              });
-            }
-
-            await Future.delayed(const Duration(milliseconds: 500));
-            _hasPlayedSuccessfully = true;
-
-            if (mounted) {
-              Navigator.of(context).pop();
-            }
-            return;
-          } catch (e) {
-            debugPrint('Failed to launch external player: $e');
-          }
-        }
-
-
-
 
         await player.open(Media(widget.offlineFilePath!));
         unawaited(_loadOfflineSkipTimes(widget.offlineFilePath!));
@@ -787,81 +915,6 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         isInitialized = false; // Show loading indicator
         _hasPlayedSuccessfully = false; // Reset success flag for new source
       });
-
-      if (!kIsWeb && Platform.isLinux) {
-        final externalPlayer = await _showExternalPlayerDialog();
-        if (externalPlayer == null) {
-          debugPrint('🐧 User cancelled external player selection');
-          // If cancelling player selection, we probably shouldn't just fallback to internal player 
-          // if the intent was to watch externally. But for now, returning stops the flow.
-          // Or we could let it fall through to internal player? 
-          // Let's assume on Linux if we are here we want external.
-          // But wait, the original logic fell through to media_kit if not linux.
-          // If we return here, we stop playback. The user can just play again if they want.
-           setState(() {
-            isInitialized = true; // Stop loading
-          });
-          return;
-        }
-
-        debugPrint(
-            '🐧 Launching $externalPlayer on Linux (media_kit has rendering issues)');
-
-        try {
-          if (externalPlayer == 'vlc') {
-            await _saveVlcWatchHistory(positionMs: 0);
-
-            final vlcProcess = await Process.start('vlc', [
-              '--http-referrer=${headers['Referer'] ?? ''}',
-              '--http-user-agent=${headers['User-Agent'] ?? ''}',
-              if (subtitleUrl != null) '--sub-file=$subtitleUrl',
-              '--meta-title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-              videoUrl,
-            ]);
-
-            vlcProcess.exitCode.then((code) async {
-              debugPrint('VLC exited with code: $code');
-              if (code == 0) {
-                await _saveVlcWatchHistory(
-                    positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-              } else if (mounted) {
-                _playNextSource();
-              }
-            });
-          } else if (externalPlayer == 'mpv') {
-             await _saveVlcWatchHistory(positionMs: 0);
-
-            final mpvProcess = await Process.start('mpv', [
-              '--referrer=${headers['Referer'] ?? ''}',
-              '--user-agent=${headers['User-Agent'] ?? ''}',
-              if (subtitleUrl != null) '--sub-file=$subtitleUrl',
-              '--title=${widget.animeTitle} - Episode ${widget.episodeNumber}',
-              videoUrl,
-            ]);
-
-            mpvProcess.exitCode.then((code) async {
-              debugPrint('MPV exited with code: $code');
-              if (code == 0) {
-                await _saveVlcWatchHistory(
-                    positionMs: 22 * 60 * 1000, durationMs: 24 * 60 * 1000);
-              } else if (mounted) {
-                _playNextSource();
-              }
-            });
-          }
-          
-          // Exit early - external player is handling playback
-          await Future.delayed(const Duration(milliseconds: 500));
-          _hasPlayedSuccessfully = true;
-          
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
-          return;
-        } catch (e) {
-          debugPrint('Failed to launch external player: $e');
-        }
-      }
 
       await player.open(
         Media(videoUrl, httpHeaders: headers),
@@ -1244,9 +1297,19 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       _saveWatchHistory(position, duration);
     }
 
-    try {
-      ScreenBrightness().resetScreenBrightness();
-    } catch (_) {}
+    if (_usesKeyboard) {
+      HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+      _keySeekTimer?.cancel();
+      _openPlayers--;
+      if (_openPlayers == 0 && _windowFullscreen) _setFullscreen(false);
+    }
+
+    // screen_brightness has no Linux implementation.
+    if (kIsWeb || !Platform.isLinux) {
+      try {
+        ScreenBrightness().resetScreenBrightness();
+      } catch (_) {}
+    }
 
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -1264,6 +1327,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   @override
   Widget build(BuildContext context) {
+    final screen = _buildScreen(context);
+
+    // A key handler doesn't stop keys reaching the focus system, where arrows
+    // would move focus to the back button and Space would press it. So on
+    // desktop the buttons are mouse-only and can't take focus.
+    return _usesKeyboard ? ExcludeFocus(child: screen) : screen;
+  }
+
+  Widget _buildScreen(BuildContext context) {
     if (hasError) {
       return Scaffold(
         backgroundColor: Colors.black,
@@ -1867,11 +1939,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                         ),
                         icon: const Icon(Icons.fast_forward),
                         label: Text(_activeSkip!.label),
-                        onPressed: () {
-                          final target = _activeSkip!.end;
-                          setState(() => _activeSkip = null);
-                          player.seek(target);
-                        },
+                        onPressed: _skipActiveSegment,
                       ),
                     ),
 
@@ -1931,36 +1999,6 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                 ),
               ),
       ),
-    );
-  }
-
-  Future<String?> _showExternalPlayerDialog() async {
-    return showDialog<String>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Colors.grey[900],
-          title: const Text('Select Video Player',
-              style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.video_library, color: Colors.orange),
-                title: const Text('VLC Media Player',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () => Navigator.pop(context, 'vlc'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.play_circle_outline, color: Colors.purple),
-                title: const Text('MPV Player',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () => Navigator.pop(context, 'mpv'),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }

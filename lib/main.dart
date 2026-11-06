@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:window_manager/window_manager.dart';
 import 'core/theme/app_theme.dart';
 import 'services/storage_service.dart';
 import 'services/download_storage_service.dart';
@@ -18,6 +19,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   MediaKit.ensureInitialized();
+
+  // For the player's fullscreen key.
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+    await windowManager.ensureInitialized();
+  }
 
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     try {

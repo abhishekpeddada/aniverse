@@ -14,8 +14,8 @@ dependencies:
   flutter_riverpod: ^2.6.1
 
   # Video Player
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.5
 
   # HTTP Client
@@ -59,6 +59,7 @@ dependencies:
   cronet_http: ^1.10.0
   http: ^1.6.0
   pointycastle: ^4.0.0
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:
@@ -74,3 +75,10 @@ flutter:
   uses-material-design: true
   assets:
     - assets/models/
+
+dependency_overrides:
+  # media_kit_video 2.0.1 plus the upstream Linux stutter fix (media-kit #1440),
+  # which isn't on pub.dev yet. Drop this once a newer release includes it;
+  # third_party/media_kit_video/README.aniverse.md has the details.
+  media_kit_video:
+    path: third_party/media_kit_video
